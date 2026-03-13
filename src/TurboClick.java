@@ -4,6 +4,7 @@ import javax.swing.event.TableModelEvent;
 import javax.swing.table.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -27,14 +28,27 @@ public class TurboClick implements NativeKeyListener {
     static boolean smartModeActive      = false;
     static TurboClick instance;
 
-    // === Live HUD state (updated by click thread) ===
-    static volatile int    hudPointIndex    = 0;   // current click # (0-based)
-    static volatile int    hudPointTotal    = 0;   // total click points
-    static volatile long   hudLoopsLeft     = 0;   // max loops remaining (0=∞)
-    static volatile int    hudSubClickIndex = 0;   // current sub-click index
-    static volatile int    hudSubClickTotal = 0;   // sub-clicks for current point
-    static volatile long   hudSubDelayLeft  = 0;   // ms countdown till next sub-click
-    static volatile long   hudNextPointLeft = 0;   // ms countdown till next point
+    // === HUD state ===
+    static volatile int  hudPointIndex    = 0;
+    static volatile int  hudPointTotal    = 0;
+    static volatile long hudLoopsLeft     = 0;
+    static volatile int  hudSubClickIndex = 0;
+    static volatile int  hudSubClickTotal = 0;
+    static volatile long hudSubDelayLeft  = 0;
+    static volatile long hudNextPointLeft = 0;
+
+    // === Watch Zone state ===
+    static volatile boolean watchRunning      = false;
+    static BufferedImage    watchTemplate     = null;   // captured reference image
+    static Rectangle        watchZone         = null;   // screen rectangle to scan
+    static Rectangle        watchClickTarget  = null;   // center of zone to click
+    static int              watchConfidence   = 85;     // match % threshold
+    static int              watchPollMs       = 500;    // scan interval ms
+    static int              watchCooldownMs   = 2000;   // ms to wait after a trigger
+    static Thread           watchThread       = null;
+    static JLabel           watchStatusLabel;
+    static JLabel           watchTemplatePreview;
+    static JButton          watchStartBtn, watchStopBtn;
 
     // === UI ===
     static JLabel     statusLabel, clickCountLabel, hotkeyLabel, smartKeyLabel;
@@ -46,7 +60,7 @@ public class TurboClick implements NativeKeyListener {
     static JPanel     intervalSpinnersPanel;
     static JFrame     frame;
 
-    // === Table — columns: #, X, Y, Clicks, Sub-Click Delay (ms), Delay-After (ms) ===
+    // === Table — #, X, Y, Clicks, Sub-Delay(ms), Delay-After(ms) ===
     static DefaultTableModel tableModel;
     static JTable pointsTable;
 
@@ -98,6 +112,251 @@ public class TurboClick implements NativeKeyListener {
     }
 
     // =========================================================
+    //  IMAGE MATCHING (no external library)
+    // =========================================================
+    // Returns 0.0–1.0 match score. Downsample both to 32px wide for speed.
+    static double imageMatchScore(BufferedImage template, BufferedImage region) {
+        if (template == null || region == null) return 0;
+        int tw = 32, th = Math.max(1, template.getHeight() * 32 / Math.max(1,template.getWidth()));
+        BufferedImage t = resize(template, tw, th);
+        BufferedImage r = resize(region,   tw, th);
+        long totalDiff = 0, maxDiff = (long) tw * th * 255 * 3;
+        for (int y = 0; y < th; y++) {
+            for (int x = 0; x < tw; x++) {
+                Color tc = new Color(t.getRGB(x,y));
+                Color rc = new Color(r.getRGB(x,y));
+                totalDiff += Math.abs(tc.getRed()  -rc.getRed())
+                           + Math.abs(tc.getGreen()-rc.getGreen())
+                           + Math.abs(tc.getBlue() -rc.getBlue());
+            }
+        }
+        return 1.0 - (double) totalDiff / maxDiff;
+    }
+
+    static BufferedImage resize(BufferedImage src, int w, int h) {
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2 = out.createGraphics();
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2.drawImage(src, 0, 0, w, h, null);
+        g2.dispose();
+        return out;
+    }
+
+    // Scan zone image for best-match location of template; returns center Point or null
+    static Point findTemplateInZone(BufferedImage tmpl, BufferedImage zone) {
+        int tw = tmpl.getWidth(), th = tmpl.getHeight();
+        int zw = zone.getWidth(),  zh = zone.getHeight();
+        if (tw > zw || th > zh) return null;
+
+        double best = 0; int bestX = -1, bestY = -1;
+        int step = Math.max(1, Math.min(tw, th) / 6); // step for speed
+
+        for (int y = 0; y <= zh - th; y += step) {
+            for (int x = 0; x <= zw - tw; x += step) {
+                BufferedImage sub = zone.getSubimage(x, y, tw, th);
+                double score = imageMatchScore(tmpl, sub);
+                if (score > best) { best = score; bestX = x; bestY = y; }
+            }
+        }
+        if (best * 100 >= watchConfidence && bestX >= 0) {
+            return new Point(bestX + tw/2, bestY + th/2);
+        }
+        return null;
+    }
+
+    // =========================================================
+    //  WATCH ZONE THREAD
+    // =========================================================
+    static void startWatchZone() {
+        if (watchTemplate == null || watchZone == null) {
+            setWatchStatus("⚠ Set zone and capture template first", new Color(200,120,0));
+            return;
+        }
+        watchRunning = true;
+        setWatchStatus("👁 Watching…", new Color(40,160,80));
+        watchStartBtn.setEnabled(false);
+        watchStopBtn.setEnabled(true);
+
+        watchThread = new Thread(() -> {
+            try {
+                Robot robot = new Robot();
+                while (watchRunning) {
+                    // Capture the watch zone
+                    BufferedImage zoneImg = robot.createScreenCapture(watchZone);
+                    Point match = findTemplateInZone(watchTemplate, zoneImg);
+
+                    if (match != null) {
+                        // Translate relative match back to screen coords
+                        int screenClickX = watchZone.x + match.x;
+                        int screenClickY = watchZone.y + match.y;
+                        SwingUtilities.invokeLater(() ->
+                            setWatchStatus("✔ Match found! Clicking…", new Color(40,200,80)));
+                        robot.mouseMove(screenClickX, screenClickY);
+                        Thread.sleep(80);
+                        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+                        robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+                        clickCount++;
+                        final long c = clickCount;
+                        SwingUtilities.invokeLater(() -> {
+                            clickCountLabel.setText("Clicks: "+c);
+                            setWatchStatus("✔ Clicked! Cooling down "+watchCooldownMs+"ms…", new Color(40,200,80));
+                        });
+                        Thread.sleep(watchCooldownMs);
+                        SwingUtilities.invokeLater(() -> setWatchStatus("👁 Watching…", new Color(40,160,80)));
+                    }
+                    Thread.sleep(watchPollMs);
+                }
+            } catch (Exception ex) { ex.printStackTrace(); }
+            SwingUtilities.invokeLater(() -> {
+                setWatchStatus("● Stopped", new Color(150,150,150));
+                watchStartBtn.setEnabled(true);
+                watchStopBtn.setEnabled(false);
+            });
+        });
+        watchThread.setDaemon(true);
+        watchThread.start();
+    }
+
+    static void stopWatchZone() {
+        watchRunning = false;
+        setWatchStatus("● Stopped", new Color(150,150,150));
+        watchStartBtn.setEnabled(true);
+        watchStopBtn.setEnabled(false);
+    }
+
+    static void setWatchStatus(String txt, Color c) {
+        if (watchStatusLabel != null) {
+            watchStatusLabel.setText(txt);
+            watchStatusLabel.setForeground(c);
+        }
+    }
+
+    // Overlay to draw a rectangle on screen for zone selection
+    static void startZoneSelector(boolean captureTemplate) {
+        // Brief delay so the current window doesn't appear in the capture
+        Timer delay = new Timer(300, ev -> {
+            frame.setVisible(false);
+            showZoneSelectorOverlay(captureTemplate);
+        });
+        delay.setRepeats(false);
+        delay.start();
+    }
+
+    static void showZoneSelectorOverlay(boolean captureTemplate) {
+        JWindow overlay = new JWindow();
+        overlay.setAlwaysOnTop(true);
+        overlay.setBackground(new Color(0,0,0,0));
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        overlay.setBounds(0, 0, screen.width, screen.height);
+
+        int[] drag = {0,0,0,0}; // x1,y1,x2,y2
+        boolean[] dragging = {false};
+
+        JPanel glass = new JPanel() {
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g;
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                // dim overlay
+                g2.setColor(new Color(0,0,0,60));
+                g2.fillRect(0,0,getWidth(),getHeight());
+                // instruction
+                g2.setColor(Color.WHITE);
+                g2.setFont(new Font("SansSerif",Font.BOLD,18));
+                String msg = captureTemplate
+                    ? "Drag to select the BUTTON to watch for   [ESC cancel]"
+                    : "Drag to select the WATCH ZONE area       [ESC cancel]";
+                FontMetrics fm = g2.getFontMetrics();
+                g2.drawString(msg, (getWidth()-fm.stringWidth(msg))/2, 46);
+                // rectangle
+                if (dragging[0]) {
+                    int rx=Math.min(drag[0],drag[2]), ry=Math.min(drag[1],drag[3]);
+                    int rw=Math.abs(drag[2]-drag[0]), rh=Math.abs(drag[3]-drag[1]);
+                    // clear selection area
+                    g2.setColor(new Color(0,0,0,0));
+                    Composite old = g2.getComposite();
+                    g2.setComposite(AlphaComposite.Clear);
+                    g2.fillRect(rx,ry,rw,rh);
+                    g2.setComposite(old);
+                    // border
+                    g2.setColor(new Color(80,200,255));
+                    g2.setStroke(new BasicStroke(2));
+                    g2.drawRect(rx,ry,rw,rh);
+                    // size label
+                    g2.setColor(new Color(80,200,255));
+                    g2.setFont(new Font("Monospaced",Font.BOLD,12));
+                    g2.drawString(rw+"×"+rh, rx+4, ry-4);
+                }
+            }
+        };
+        glass.setOpaque(false);
+        glass.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+
+        glass.addMouseListener(new MouseAdapter() {
+            public void mousePressed(MouseEvent e) {
+                drag[0]=e.getX(); drag[1]=e.getY();
+                drag[2]=e.getX(); drag[3]=e.getY();
+                dragging[0]=true;
+            }
+            public void mouseReleased(MouseEvent e) {
+                drag[2]=e.getX(); drag[3]=e.getY();
+                int rx=Math.min(drag[0],drag[2]), ry=Math.min(drag[1],drag[3]);
+                int rw=Math.abs(drag[2]-drag[0]), rh=Math.abs(drag[3]-drag[1]);
+                if (rw < 4 || rh < 4) { overlay.dispose(); frame.setVisible(true); return; }
+                overlay.dispose();
+                // Small delay so overlay is gone before capture
+                Timer t = new Timer(150, ev -> {
+                    try {
+                        Robot robot = new Robot();
+                        Rectangle rect = new Rectangle(rx, ry, rw, rh);
+                        BufferedImage capture = robot.createScreenCapture(rect);
+                        if (captureTemplate) {
+                            watchTemplate = capture;
+                            SwingUtilities.invokeLater(() -> {
+                                updateTemplatePreview(capture);
+                                setWatchStatus("Template captured — now set Watch Zone", new Color(40,160,200));
+                            });
+                        } else {
+                            watchZone = rect;
+                            watchClickTarget = new Rectangle(rx+rw/2-1, ry+rh/2-1, 2, 2);
+                            SwingUtilities.invokeLater(() ->
+                                setWatchStatus("Zone set: "+rx+","+ry+" "+rw+"×"+rh+"px", new Color(40,160,200)));
+                        }
+                    } catch (Exception ex) { ex.printStackTrace(); }
+                    frame.setVisible(true);
+                    frame.toFront();
+                });
+                t.setRepeats(false);
+                t.start();
+            }
+        });
+        glass.addMouseMotionListener(new MouseMotionAdapter() {
+            public void mouseDragged(MouseEvent e) {
+                drag[2]=e.getX(); drag[3]=e.getY();
+                glass.repaint();
+            }
+        });
+        glass.addKeyListener(new KeyAdapter() {
+            public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode()==KeyEvent.VK_ESCAPE) {
+                    overlay.dispose(); frame.setVisible(true);
+                }
+            }
+        });
+
+        overlay.setContentPane(glass);
+        overlay.setVisible(true);
+        glass.requestFocusInWindow();
+    }
+
+    static void updateTemplatePreview(BufferedImage img) {
+        if (watchTemplatePreview == null) return;
+        // Scale to fit 60×40 preview
+        Image scaled = img.getScaledInstance(60, 40, Image.SCALE_SMOOTH);
+        watchTemplatePreview.setIcon(new ImageIcon(scaled));
+        watchTemplatePreview.setText("");
+    }
+
+    // =========================================================
     //  SMART PIN
     // =========================================================
     static class SmartPin {
@@ -115,7 +374,7 @@ public class TurboClick implements NativeKeyListener {
 
             JPanel panel = new JPanel() {
                 protected void paintComponent(Graphics g) {
-                    Graphics2D g2 = (Graphics2D)g;
+                    Graphics2D g2=(Graphics2D)g;
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
                     g2.setColor(new Color(0,0,0,40));
                     g2.fillRoundRect(3,3,getWidth()-3,getHeight()-16,12,12);
@@ -153,7 +412,6 @@ public class TurboClick implements NativeKeyListener {
                 public void mouseExited(MouseEvent e){ closeBtn.setForeground(new Color(200,200,200)); }
             });
             panel.add(closeBtn, BorderLayout.EAST);
-
             panel.addMouseListener(new MouseAdapter(){
                 public void mousePressed(MouseEvent e){ dragOffsetX=e.getX(); dragOffsetY=e.getY(); }
             });
@@ -169,7 +427,6 @@ public class TurboClick implements NativeKeyListener {
                     }
                 }
             });
-
             win.setContentPane(panel);
             win.pack();
             win.setLocation(screenX-win.getWidth()/2, screenY-win.getHeight());
@@ -181,15 +438,12 @@ public class TurboClick implements NativeKeyListener {
                 Object clicks   = tableModel.getValueAt(rowIndex,3);
                 Object subDelay = tableModel.getValueAt(rowIndex,4);
                 Object delay    = tableModel.getValueAt(rowIndex,5);
-                return "<html>"
-                    + "<span style='color:#64dc64'>×"+clicks+" clicks</span> "
+                return "<html><span style='color:#64dc64'>×"+clicks+" clicks</span> "
                     + "<span style='color:#88aaff'>"+subDelay+"ms gap</span><br>"
-                    + "<span style='color:#aaaaaa'>→next: "+delay+"ms</span>"
-                    + "</html>";
+                    + "<span style='color:#aaaaaa'>→next: "+delay+"ms</span></html>";
             }
             return "";
         }
-
         void refreshLabel() { infoLabel.setText(pinInfoHtml()); }
         void show()    { win.setVisible(true); }
         void hide()    { win.setVisible(false); }
@@ -227,6 +481,7 @@ public class TurboClick implements NativeKeyListener {
         main.setBorder(new EmptyBorder(12,15,12,15));
         main.setBackground(new Color(245,245,245));
 
+        // Title
         JLabel title = new JLabel("TurboClick");
         title.setFont(new Font("SansSerif",Font.BOLD,22));
         title.setForeground(new Color(30,30,30));
@@ -244,7 +499,6 @@ public class TurboClick implements NativeKeyListener {
         settings.setLayout(new BoxLayout(settings,BoxLayout.Y_AXIS));
         settings.setBackground(Color.WHITE);
         settings.setBorder(makeTitledBorder("Click Interval"));
-
         String[] unitLabels = {"Hours","Minutes","Seconds","1/10 s","1/100 s","1/1000 s"};
         JPanel spinnerHeaderRow = new JPanel(new GridLayout(1,6,4,0));
         spinnerHeaderRow.setBackground(Color.WHITE);
@@ -262,101 +516,130 @@ public class TurboClick implements NativeKeyListener {
         spTenths=makeSpinner(1,0,9); spHundredths=makeSpinner(0,0,9); spThousandths=makeSpinner(0,0,9);
         for (JSpinner sp : new JSpinner[]{spHours,spMinutes,spSeconds,spTenths,spHundredths,spThousandths})
             intervalSpinnersPanel.add(sp);
-        settings.add(spinnerHeaderRow);
-        settings.add(intervalSpinnersPanel);
-        settings.add(new JSeparator());
-
+        settings.add(spinnerHeaderRow); settings.add(intervalSpinnersPanel); settings.add(new JSeparator());
         JPanel otherGrid = new JPanel(new GridLayout(3,2,8,8));
-        otherGrid.setBackground(Color.WHITE);
-        otherGrid.setBorder(new EmptyBorder(6,6,6,6));
-        otherGrid.add(makeLabel("Mouse Button:"));
-        mouseButtonCombo = makeCombo(new String[]{"Left","Right","Middle"});
-        otherGrid.add(mouseButtonCombo);
-        otherGrid.add(makeLabel("Click Type:"));
-        clickTypeCombo = makeCombo(new String[]{"Single Click","Double Click"});
-        otherGrid.add(clickTypeCombo);
-        otherGrid.add(makeLabel("Max Clicks (0=∞):"));
-        maxClicksField = makeField("0");
-        otherGrid.add(maxClicksField);
+        otherGrid.setBackground(Color.WHITE); otherGrid.setBorder(new EmptyBorder(6,6,6,6));
+        otherGrid.add(makeLabel("Mouse Button:")); mouseButtonCombo=makeCombo(new String[]{"Left","Right","Middle"}); otherGrid.add(mouseButtonCombo);
+        otherGrid.add(makeLabel("Click Type:")); clickTypeCombo=makeCombo(new String[]{"Single Click","Double Click"}); otherGrid.add(clickTypeCombo);
+        otherGrid.add(makeLabel("Max Clicks (0=∞):")); maxClicksField=makeField("0"); otherGrid.add(maxClicksField);
         settings.add(otherGrid);
-
         JPanel smartHintRow = new JPanel(new FlowLayout(FlowLayout.LEFT,8,2));
         smartHintRow.setBackground(Color.WHITE);
         smartIntervalStatusLabel = new JLabel("Smart Interval off — set Clicks > 1 in any row to activate");
         smartIntervalStatusLabel.setFont(new Font("SansSerif",Font.ITALIC,10));
         smartIntervalStatusLabel.setForeground(new Color(150,150,150));
-        smartHintRow.add(smartIntervalStatusLabel);
-        settings.add(smartHintRow);
-        main.add(settings);
-        main.add(Box.createVerticalStrut(10));
+        smartHintRow.add(smartIntervalStatusLabel); settings.add(smartHintRow);
+        main.add(settings); main.add(Box.createVerticalStrut(10));
 
         // ── Click Points Table ────────────────────────────────
-        // Columns: #, X, Y, Clicks, Sub-Click Delay (ms), Delay-After (ms)
         JPanel pointsPanel = new JPanel(new BorderLayout(6,6));
         pointsPanel.setBackground(Color.WHITE);
         pointsPanel.setBorder(makeTitledBorder("Click Points  (empty = click at cursor)"));
-
-        tableModel = new DefaultTableModel(
-            new String[]{"#","X","Y","Clicks","Sub-Delay (ms)","Delay-After (ms)"},0) {
+        tableModel = new DefaultTableModel(new String[]{"#","X","Y","Clicks","Sub-Delay (ms)","Delay-After (ms)"},0) {
             public boolean isCellEditable(int r, int c) { return c > 0; }
         };
         pointsTable = new JTable(tableModel);
         pointsTable.setFont(new Font("SansSerif",Font.PLAIN,12));
         pointsTable.setRowHeight(24);
-        pointsTable.getColumnModel().getColumn(0).setPreferredWidth(22);
-        pointsTable.getColumnModel().getColumn(1).setPreferredWidth(50);
-        pointsTable.getColumnModel().getColumn(2).setPreferredWidth(50);
-        pointsTable.getColumnModel().getColumn(3).setPreferredWidth(45);
-        pointsTable.getColumnModel().getColumn(4).setPreferredWidth(95);
-        pointsTable.getColumnModel().getColumn(5).setPreferredWidth(105);
+        int[] colW = {22,50,50,45,95,105};
+        for (int i=0;i<colW.length;i++) pointsTable.getColumnModel().getColumn(i).setPreferredWidth(colW[i]);
         pointsTable.setGridColor(new Color(220,220,220));
         pointsTable.setSelectionBackground(new Color(210,230,255));
-
         tableModel.addTableModelListener(e -> {
-            int row = e.getFirstRow(), col = e.getColumn();
-            if (row < 0) return;
-            if (row < smartPins.size()) {
-                SmartPin pin = smartPins.get(row);
+            int row=e.getFirstRow(), col=e.getColumn();
+            if (row<0) return;
+            if (row<smartPins.size()) {
+                SmartPin pin=smartPins.get(row);
                 try {
-                    if (col==1) { pin.screenX=Integer.parseInt(tableModel.getValueAt(row,1).toString()); }
-                    if (col==2) { pin.screenY=Integer.parseInt(tableModel.getValueAt(row,2).toString()); }
-                    if (col==1||col==2)
-                        pin.win.setLocation(pin.screenX-pin.win.getWidth()/2,pin.screenY-pin.win.getHeight());
+                    if (col==1) pin.screenX=Integer.parseInt(tableModel.getValueAt(row,1).toString());
+                    if (col==2) pin.screenY=Integer.parseInt(tableModel.getValueAt(row,2).toString());
+                    if (col==1||col==2) pin.win.setLocation(pin.screenX-pin.win.getWidth()/2,pin.screenY-pin.win.getHeight());
                     if (col==3||col==4||col==5) pin.refreshLabel();
                 } catch (Exception ignored) {}
             }
-            if (col==3||col==TableModelEvent.ALL_COLUMNS)
-                SwingUtilities.invokeLater(TurboClick::refreshSmartIntervalStatus);
+            if (col==3||col==TableModelEvent.ALL_COLUMNS) SwingUtilities.invokeLater(TurboClick::refreshSmartIntervalStatus);
         });
-
         JScrollPane scroll = new JScrollPane(pointsTable);
         scroll.setPreferredSize(new Dimension(300,110));
         scroll.setBorder(BorderFactory.createLineBorder(new Color(200,200,200)));
-
         JPanel tblBtns = new JPanel(new FlowLayout(FlowLayout.LEFT,6,4));
         tblBtns.setBackground(Color.WHITE);
-        JButton addManualBtn = makeActionButton("+ Add Point", new Color(80,80,80));
-        JButton removeBtn    = makeActionButton("✕ Remove",    new Color(180,60,60));
-        JButton clearBtn     = makeActionButton("Clear All",   new Color(120,120,120));
+        JButton addManualBtn=makeActionButton("+ Add Point",new Color(80,80,80));
+        JButton removeBtn=makeActionButton("✕ Remove",new Color(180,60,60));
+        JButton clearBtn=makeActionButton("Clear All",new Color(120,120,120));
         addManualBtn.addActionListener(e -> { Point m=MouseInfo.getPointerInfo().getLocation(); addSmartPin(m.x,m.y); });
         removeBtn.addActionListener(e -> {
             int row=pointsTable.getSelectedRow();
-            if (row>=0) {
-                smartPins.get(row).dispose(); smartPins.remove(row);
-                tableModel.removeRow(row); refreshRowNumbers();
-                for (int i=0;i<smartPins.size();i++) smartPins.get(i).rowIndex=i;
-                refreshSmartIntervalStatus();
-            }
+            if (row>=0) { smartPins.get(row).dispose(); smartPins.remove(row); tableModel.removeRow(row); refreshRowNumbers(); for(int i=0;i<smartPins.size();i++) smartPins.get(i).rowIndex=i; refreshSmartIntervalStatus(); }
         });
-        clearBtn.addActionListener(e -> {
-            for (SmartPin p:smartPins) p.dispose(); smartPins.clear();
-            tableModel.setRowCount(0); refreshSmartIntervalStatus();
-        });
+        clearBtn.addActionListener(e -> { for(SmartPin p:smartPins) p.dispose(); smartPins.clear(); tableModel.setRowCount(0); refreshSmartIntervalStatus(); });
         tblBtns.add(addManualBtn); tblBtns.add(removeBtn); tblBtns.add(clearBtn);
-        pointsPanel.add(scroll,BorderLayout.CENTER);
-        pointsPanel.add(tblBtns,BorderLayout.SOUTH);
-        main.add(pointsPanel);
-        main.add(Box.createVerticalStrut(10));
+        pointsPanel.add(scroll,BorderLayout.CENTER); pointsPanel.add(tblBtns,BorderLayout.SOUTH);
+        main.add(pointsPanel); main.add(Box.createVerticalStrut(10));
+
+        // ── Watch Zone ────────────────────────────────────────
+        JPanel watchPanel = new JPanel();
+        watchPanel.setLayout(new BoxLayout(watchPanel,BoxLayout.Y_AXIS));
+        watchPanel.setBackground(Color.WHITE);
+        watchPanel.setBorder(makeTitledBorder("Watch Zone  (auto-click when image appears)"));
+
+        // Row 1: buttons
+        JPanel wRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT,6,4));
+        wRow1.setBackground(Color.WHITE);
+        JButton captureBtn  = makeActionButton("📷 Capture Button",  new Color(80,80,160));
+        JButton setZoneBtn  = makeActionButton("⬚ Set Watch Zone",   new Color(60,120,60));
+        wRow1.add(captureBtn); wRow1.add(setZoneBtn);
+        captureBtn.addActionListener(e -> startZoneSelector(true));
+        setZoneBtn.addActionListener(e -> startZoneSelector(false));
+
+        // Row 2: template preview + confidence + poll
+        JPanel wRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT,8,4));
+        wRow2.setBackground(Color.WHITE);
+        watchTemplatePreview = new JLabel("No template");
+        watchTemplatePreview.setFont(new Font("SansSerif",Font.ITALIC,10));
+        watchTemplatePreview.setForeground(new Color(150,150,150));
+        watchTemplatePreview.setPreferredSize(new Dimension(62,42));
+        watchTemplatePreview.setBorder(BorderFactory.createLineBorder(new Color(180,180,180)));
+        watchTemplatePreview.setHorizontalAlignment(SwingConstants.CENTER);
+
+        JLabel confLabel = makeLabel("Match %:");
+        JSpinner confSpinner = makeSpinner(85,10,100);
+        confSpinner.addChangeListener(e -> watchConfidence = ((Number)confSpinner.getValue()).intValue());
+
+        JLabel pollLabel = makeLabel("Poll ms:");
+        JTextField pollField = makeField("500");
+        pollField.setPreferredSize(new Dimension(55,26));
+        pollField.addActionListener(e -> { try { watchPollMs=Integer.parseInt(pollField.getText().trim()); } catch(Exception ignored){} });
+
+        JLabel coolLabel = makeLabel("Cooldown ms:");
+        JTextField coolField = makeField("2000");
+        coolField.setPreferredSize(new Dimension(55,26));
+        coolField.addActionListener(e -> { try { watchCooldownMs=Integer.parseInt(coolField.getText().trim()); } catch(Exception ignored){} });
+
+        wRow2.add(watchTemplatePreview);
+        wRow2.add(confLabel); wRow2.add(confSpinner);
+        wRow2.add(pollLabel); wRow2.add(pollField);
+        wRow2.add(coolLabel); wRow2.add(coolField);
+
+        // Row 3: start/stop watch + status
+        JPanel wRow3 = new JPanel(new FlowLayout(FlowLayout.LEFT,6,4));
+        wRow3.setBackground(Color.WHITE);
+        watchStartBtn = makeActionButton("▶ Start Watch", new Color(40,160,80));
+        watchStopBtn  = makeActionButton("■ Stop Watch",  new Color(200,50,50));
+        watchStopBtn.setEnabled(false);
+        watchStatusLabel = new JLabel("● Idle — capture a button template and set a zone first");
+        watchStatusLabel.setFont(new Font("SansSerif",Font.PLAIN,11));
+        watchStatusLabel.setForeground(new Color(150,150,150));
+        watchStartBtn.addActionListener(e -> {
+            try { watchPollMs=Integer.parseInt(pollField.getText().trim()); } catch(Exception ignored){}
+            try { watchCooldownMs=Integer.parseInt(coolField.getText().trim()); } catch(Exception ignored){}
+            startWatchZone();
+        });
+        watchStopBtn.addActionListener(e -> stopWatchZone());
+        wRow3.add(watchStartBtn); wRow3.add(watchStopBtn); wRow3.add(watchStatusLabel);
+
+        watchPanel.add(wRow1); watchPanel.add(wRow2); watchPanel.add(wRow3);
+        main.add(watchPanel); main.add(Box.createVerticalStrut(10));
 
         // ── Hotkeys ──────────────────────────────────────────
         JPanel hotkeyPanel = new JPanel(new GridLayout(2,1,4,6));
@@ -380,8 +663,7 @@ public class TurboClick implements NativeKeyListener {
         smartToggleBtn.addActionListener(e -> toggleSmartMode());
         row2.add(smartKeyLabel); row2.add(changeSmartKeyBtn); row2.add(smartToggleBtn);
         hotkeyPanel.add(row1); hotkeyPanel.add(row2);
-        main.add(hotkeyPanel);
-        main.add(Box.createVerticalStrut(10));
+        main.add(hotkeyPanel); main.add(Box.createVerticalStrut(10));
 
         // ── Status ───────────────────────────────────────────
         JPanel statusPanel = new JPanel(new GridLayout(2,1,4,4));
@@ -396,8 +678,7 @@ public class TurboClick implements NativeKeyListener {
         clickCountLabel.setForeground(new Color(80,80,80));
         clickCountLabel.setBorder(new EmptyBorder(0,8,4,0));
         statusPanel.add(statusLabel); statusPanel.add(clickCountLabel);
-        main.add(statusPanel);
-        main.add(Box.createVerticalStrut(14));
+        main.add(statusPanel); main.add(Box.createVerticalStrut(14));
 
         // ── Start / Stop ─────────────────────────────────────
         JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.CENTER,16,0));
@@ -407,9 +688,7 @@ public class TurboClick implements NativeKeyListener {
         startButton.setFont(new Font("SansSerif",Font.BOLD,14));
         startButton.setBackground(new Color(40,160,80)); startButton.setForeground(Color.WHITE);
         startButton.setOpaque(true); startButton.setFocusPainted(false);
-        startButton.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(20,110,50),2),
-            BorderFactory.createEmptyBorder(6,16,6,16)));
+        startButton.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(20,110,50),2),BorderFactory.createEmptyBorder(6,16,6,16)));
         startButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         startButton.addActionListener(e -> startClicking());
         stopButton = new JButton("■  Stop");
@@ -417,30 +696,26 @@ public class TurboClick implements NativeKeyListener {
         stopButton.setFont(new Font("SansSerif",Font.BOLD,14));
         stopButton.setBackground(new Color(200,50,50)); stopButton.setForeground(Color.WHITE);
         stopButton.setOpaque(true); stopButton.setFocusPainted(false);
-        stopButton.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(140,20,20),2),
-            BorderFactory.createEmptyBorder(6,16,6,16)));
+        stopButton.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(140,20,20),2),BorderFactory.createEmptyBorder(6,16,6,16)));
         stopButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         stopButton.addActionListener(e -> stopClicking());
         btnPanel.add(startButton); btnPanel.add(stopButton);
-        main.add(btnPanel);
-        main.add(Box.createVerticalStrut(8));
+        main.add(btnPanel); main.add(Box.createVerticalStrut(8));
 
         frame.setContentPane(main);
         frame.pack();
-        frame.setMinimumSize(new Dimension(420,630));
+        frame.setMinimumSize(new Dimension(430,700));
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
     }
 
     // =========================================================
-    //  HUD OVERLAY  (read-only, non-clickable, top-center)
+    //  HUD OVERLAY
     // =========================================================
     static void showHud() {
         hudWindow = new JWindow();
         hudWindow.setAlwaysOnTop(true);
         hudWindow.setBackground(new Color(0,0,0,0));
-        // Make it non-focusable so it never steals clicks
         hudWindow.setFocusableWindowState(false);
 
         JPanel hud = new JPanel() {
@@ -449,7 +724,6 @@ public class TurboClick implements NativeKeyListener {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
                 g2.setColor(new Color(15,15,15,210));
                 g2.fillRoundRect(0,0,getWidth(),getHeight(),16,16);
-                // green top accent
                 g2.setColor(new Color(40,200,80,200));
                 g2.fillRoundRect(0,0,getWidth(),3,4,4);
             }
@@ -458,72 +732,49 @@ public class TurboClick implements NativeKeyListener {
         hud.setLayout(new GridLayout(1,5,0,0));
         hud.setBorder(new EmptyBorder(6,12,6,12));
 
-        hudPointLbl    = hudCell("Click #", "─/─",    new Color(100,200,255));
-        hudLoopsLbl    = hudCell("Loops left", "─",   new Color(180,180,180));
-        hudSubLbl      = hudCell("Sub-click", "─/─",  new Color(100,255,160));
-        hudSubDelayLbl = hudCell("Sub delay", "─ms",  new Color(180,140,255));
-        hudNextLbl     = hudCell("Next point", "─ms", new Color(255,180,80));
+        hudPointLbl    = hudCell("Click #",    "─/─");
+        hudLoopsLbl    = hudCell("Loops left", "─");
+        hudSubLbl      = hudCell("Sub-click",  "─/─");
+        hudSubDelayLbl = hudCell("Sub delay",  "─ms");
+        hudNextLbl     = hudCell("Next point", "─ms");
 
-        hud.add(hudPointLbl);
-        hud.add(hudLoopsLbl);
-        hud.add(hudSubLbl);
-        hud.add(hudSubDelayLbl);
-        hud.add(hudNextLbl);
+        hud.add(hudPointLbl); hud.add(hudLoopsLbl); hud.add(hudSubLbl);
+        hud.add(hudSubDelayLbl); hud.add(hudNextLbl);
 
         hudWindow.setContentPane(hud);
         hudWindow.pack();
         hudWindow.setSize(520, hudWindow.getHeight());
-
         Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
-        hudWindow.setLocation(screen.width/2 - hudWindow.getWidth()/2, 18);
+        hudWindow.setLocation(screen.width/2-hudWindow.getWidth()/2, 18);
         hudWindow.setVisible(true);
 
-        // Update HUD labels at 100ms tick
         new Timer(100, e -> {
             if (!running) { ((Timer)e.getSource()).stop(); return; }
-            String pointStr = (hudPointTotal>0)
-                ? (hudPointIndex+1)+"/"+hudPointTotal
-                : "cursor";
-            String loopStr = hudLoopsLeft<=0 ? "∞" : String.valueOf(hudLoopsLeft);
-            String subStr  = hudSubClickTotal>1
-                ? (hudSubClickIndex+1)+"/"+hudSubClickTotal
-                : "1/1";
-            String subDelayStr = hudSubDelayLeft > 0 ? hudSubDelayLeft+"ms" : "─";
-            String nextStr     = hudNextPointLeft > 0 ? hudNextPointLeft+"ms" : "─";
-
+            String pointStr = hudPointTotal>0 ? (hudPointIndex+1)+"/"+hudPointTotal : "cursor";
+            String loopStr  = hudLoopsLeft<=0 ? "∞" : String.valueOf(hudLoopsLeft);
+            String subStr   = hudSubClickTotal>1 ? (hudSubClickIndex+1)+"/"+hudSubClickTotal : "1/1";
+            String subDStr  = hudSubDelayLeft>0 ? hudSubDelayLeft+"ms" : "─";
+            String nextStr  = hudNextPointLeft>0 ? hudNextPointLeft+"ms" : "─";
             setHudCell(hudPointLbl,    "Click #",    pointStr);
-            setHudCell(hudLoopsLbl,    "Loops left",  loopStr);
-            setHudCell(hudSubLbl,      "Sub-click",   subStr);
-            setHudCell(hudSubDelayLbl, "Sub delay",   subDelayStr);
-            setHudCell(hudNextLbl,     "Next point",  nextStr);
+            setHudCell(hudLoopsLbl,    "Loops left", loopStr);
+            setHudCell(hudSubLbl,      "Sub-click",  subStr);
+            setHudCell(hudSubDelayLbl, "Sub delay",  subDStr);
+            setHudCell(hudNextLbl,     "Next point", nextStr);
         }).start();
     }
 
-    // Build a two-line label cell: small grey title + big colored value
-    static JLabel hudCell(String title, String value, Color valueColor) {
-        JLabel l = new JLabel(
-            "<html><center><span style='font-size:8px;color:#888888'>"+title+"</span><br>"
-            +"<b><span style='font-size:12px;color:"+colorHex(valueColor)+"'>"+value+"</span></b></center></html>",
-            SwingConstants.CENTER);
-        l.setForeground(Color.WHITE);
+    static JLabel hudCell(String title, String value) {
+        JLabel l = new JLabel("", SwingConstants.CENTER);
+        setHudCell(l, title, value);
         return l;
     }
-
     static void setHudCell(JLabel l, String title, String value) {
-        Color vc = l.getForeground(); // we stored accent via foreground hack — just rebuild
         l.setText("<html><center>"
             +"<span style='font-size:8px;color:#888888'>"+title+"</span><br>"
             +"<b><span style='font-size:12px;color:white'>"+value+"</span></b>"
             +"</center></html>");
     }
-
-    static String colorHex(Color c) {
-        return String.format("#%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
-    }
-
-    static void hideHud() {
-        if (hudWindow != null) { hudWindow.dispose(); hudWindow = null; }
-    }
+    static void hideHud() { if(hudWindow!=null){ hudWindow.dispose(); hudWindow=null; } }
 
     // =========================================================
     //  SMART MODE
@@ -531,14 +782,12 @@ public class TurboClick implements NativeKeyListener {
     static void toggleSmartMode() {
         smartModeActive = !smartModeActive;
         if (smartModeActive) {
-            frame.setVisible(false);
-            showSmartBar();
+            frame.setVisible(false); showSmartBar();
             for (SmartPin p:smartPins) p.show();
         } else {
             hideSmartBar();
             for (SmartPin p:smartPins) p.hide();
-            frame.setVisible(true);
-            frame.toFront();
+            frame.setVisible(true); frame.toFront();
         }
     }
 
@@ -549,7 +798,6 @@ public class TurboClick implements NativeKeyListener {
         smartBar = new JWindow();
         smartBar.setAlwaysOnTop(true);
         smartBar.setBackground(new Color(0,0,0,0));
-
         JPanel bar = new JPanel() {
             protected void paintComponent(Graphics g) {
                 Graphics2D g2=(Graphics2D)g;
@@ -560,9 +808,7 @@ public class TurboClick implements NativeKeyListener {
                 g2.fillRoundRect(0,0,getWidth(),3,4,4);
             }
         };
-        bar.setOpaque(false);
-        bar.setLayout(new FlowLayout(FlowLayout.CENTER,10,7));
-
+        bar.setOpaque(false); bar.setLayout(new FlowLayout(FlowLayout.CENTER,10,7));
         JLabel dragHandle=new JLabel("⠿");
         dragHandle.setFont(new Font("SansSerif",Font.PLAIN,16));
         dragHandle.setForeground(new Color(120,120,120));
@@ -577,33 +823,20 @@ public class TurboClick implements NativeKeyListener {
         barCoordsLabel.setFont(new Font("Monospaced",Font.BOLD,12));
         barCoordsLabel.setForeground(new Color(80,220,120));
         JButton addPinBtn=makeActionButton("+ Pin",new Color(50,130,200));
-        addPinBtn.addActionListener(e -> {
-            Point m=MouseInfo.getPointerInfo().getLocation();
-            addSmartPin(m.x,m.y); updateBarPinCount();
-        });
+        addPinBtn.addActionListener(e -> { Point m=MouseInfo.getPointerInfo().getLocation(); addSmartPin(m.x,m.y); updateBarPinCount(); });
         JButton doneBtn=makeActionButton("✓ Done",new Color(80,80,80));
         doneBtn.addActionListener(e -> toggleSmartMode());
-
-        bar.add(dragHandle); bar.add(titleLbl);
-        bar.add(makeSep()); bar.add(barPinCountLabel);
-        bar.add(makeSep()); bar.add(barCoordsLabel);
-        bar.add(makeSep()); bar.add(addPinBtn); bar.add(doneBtn);
-
+        bar.add(dragHandle); bar.add(titleLbl); bar.add(makeSep()); bar.add(barPinCountLabel);
+        bar.add(makeSep()); bar.add(barCoordsLabel); bar.add(makeSep()); bar.add(addPinBtn); bar.add(doneBtn);
         int[] off={0,0};
         bar.addMouseListener(new MouseAdapter(){ public void mousePressed(MouseEvent e){ off[0]=e.getX();off[1]=e.getY(); }});
         bar.addMouseMotionListener(new MouseMotionAdapter(){
-            public void mouseDragged(MouseEvent e){
-                Point loc=smartBar.getLocationOnScreen();
-                smartBar.setLocation(loc.x+e.getX()-off[0],loc.y+e.getY()-off[1]);
-            }
+            public void mouseDragged(MouseEvent e){ Point loc=smartBar.getLocationOnScreen(); smartBar.setLocation(loc.x+e.getX()-off[0],loc.y+e.getY()-off[1]); }
         });
-
-        smartBar.setContentPane(bar);
-        smartBar.pack();
+        smartBar.setContentPane(bar); smartBar.pack();
         Dimension screen=Toolkit.getDefaultToolkit().getScreenSize();
         smartBar.setLocation(screen.width/2-smartBar.getWidth()/2,18);
         smartBar.setVisible(true);
-
         new Timer(50, e -> {
             if (!smartModeActive){ ((Timer)e.getSource()).stop(); return; }
             Point p=MouseInfo.getPointerInfo().getLocation();
@@ -619,141 +852,93 @@ public class TurboClick implements NativeKeyListener {
     //  PIN MANAGEMENT
     // =========================================================
     static void addSmartPin(int x, int y) {
-        int row=tableModel.getRowCount();
-        long interval=getIntervalMs();
-        // Columns: #, X, Y, Clicks, Sub-Click Delay (ms), Delay-After (ms)
-        tableModel.addRow(new Object[]{row+1, x, y, 1, interval, interval});
-        SmartPin pin=new SmartPin(x,y,row);
-        smartPins.add(pin);
+        int row=tableModel.getRowCount(); long iv=getIntervalMs();
+        tableModel.addRow(new Object[]{row+1,x,y,1,iv,iv});
+        SmartPin pin=new SmartPin(x,y,row); smartPins.add(pin);
         if (smartModeActive) pin.show();
-        updateBarPinCount();
-        refreshSmartIntervalStatus();
+        updateBarPinCount(); refreshSmartIntervalStatus();
     }
-
     static void removePin(SmartPin pin) {
         int idx=smartPins.indexOf(pin);
-        if (idx>=0) {
-            pin.dispose(); smartPins.remove(idx);
-            tableModel.removeRow(idx); refreshRowNumbers();
-            for (int i=0;i<smartPins.size();i++) smartPins.get(i).rowIndex=i;
-            updateBarPinCount(); refreshSmartIntervalStatus();
-        }
+        if (idx>=0) { pin.dispose(); smartPins.remove(idx); tableModel.removeRow(idx); refreshRowNumbers(); for(int i=0;i<smartPins.size();i++) smartPins.get(i).rowIndex=i; updateBarPinCount(); refreshSmartIntervalStatus(); }
     }
-
-    static void refreshRowNumbers(){
-        for (int i=0;i<tableModel.getRowCount();i++) tableModel.setValueAt(i+1,i,0);
-    }
+    static void refreshRowNumbers(){ for(int i=0;i<tableModel.getRowCount();i++) tableModel.setValueAt(i+1,i,0); }
 
     // =========================================================
     //  CLICKING ENGINE
     // =========================================================
     static void startClicking() {
         if (running) return;
-        running = true;
-        clickCount = 0;
+        running = true; clickCount = 0;
         updateStatus("● Running", new Color(40,160,80));
 
-        // Snapshot table: {x, y, clicks, subDelay, delayAfter}
         List<int[]> points = new ArrayList<>();
-        for (int i=0; i<tableModel.getRowCount(); i++) {
+        for (int i=0;i<tableModel.getRowCount();i++) {
             try {
-                int x        = Integer.parseInt(tableModel.getValueAt(i,1).toString());
-                int y        = Integer.parseInt(tableModel.getValueAt(i,2).toString());
-                int clicks   = Integer.parseInt(tableModel.getValueAt(i,3).toString());
-                int subDelay = Integer.parseInt(tableModel.getValueAt(i,4).toString());
-                int delay    = Integer.parseInt(tableModel.getValueAt(i,5).toString());
-                points.add(new int[]{x,y,clicks,subDelay,delay});
+                points.add(new int[]{
+                    Integer.parseInt(tableModel.getValueAt(i,1).toString()),
+                    Integer.parseInt(tableModel.getValueAt(i,2).toString()),
+                    Integer.parseInt(tableModel.getValueAt(i,3).toString()),
+                    Integer.parseInt(tableModel.getValueAt(i,4).toString()),
+                    Integer.parseInt(tableModel.getValueAt(i,5).toString())
+                });
             } catch (Exception ignored) {}
         }
 
         final long globalInterval = getIntervalMs();
         final long maxClicksSetting;
-        try { maxClicksSetting = Long.parseLong(maxClicksField.getText().trim()); }
+        try { maxClicksSetting=Long.parseLong(maxClicksField.getText().trim()); }
         catch (Exception e) { stopClicking(); return; }
 
-        // HUD setup
-        hudPointTotal    = points.size();
-        hudLoopsLeft     = maxClicksSetting;
-        hudSubClickIndex = 0;
-        hudSubClickTotal = 1;
-        hudSubDelayLeft  = 0;
-        hudNextPointLeft = 0;
+        hudPointTotal=points.size(); hudLoopsLeft=maxClicksSetting;
+        hudSubClickIndex=0; hudSubClickTotal=1; hudSubDelayLeft=0; hudNextPointLeft=0;
 
-        // Hide main frame, show HUD
-        SwingUtilities.invokeLater(() -> {
-            frame.setVisible(false);
-            showHud();
-        });
+        SwingUtilities.invokeLater(() -> { frame.setVisible(false); showHud(); });
 
         new Thread(() -> {
             try {
-                Robot robot    = new Robot();
-                boolean isDouble = clickTypeCombo.getSelectedIndex()==1;
-                int button     = getSelectedButton();
-                long loopCount = 0;
-
+                Robot robot=new Robot();
+                boolean isDouble=clickTypeCombo.getSelectedIndex()==1;
+                int button=getSelectedButton();
+                long loopCount=0;
                 outer:
                 while (running) {
                     loopCount++;
-                    if (maxClicksSetting > 0 && loopCount > maxClicksSetting) { stopClicking(); break; }
-                    hudLoopsLeft = maxClicksSetting <= 0 ? 0 : maxClicksSetting - loopCount;
-
+                    if (maxClicksSetting>0&&loopCount>maxClicksSetting) { stopClicking(); break; }
+                    hudLoopsLeft=maxClicksSetting<=0?0:maxClicksSetting-loopCount;
                     if (!points.isEmpty()) {
-                        for (int pi=0; pi<points.size(); pi++) {
+                        for (int pi=0;pi<points.size();pi++) {
                             if (!running) break outer;
-                            int[] pt = points.get(pi);
-                            int px=pt[0], py=pt[1], pClicks=pt[2], pSubDelay=pt[3], pDelay=pt[4];
-
-                            hudPointIndex    = pi;
-                            hudSubClickTotal = pClicks;
-
-                            robot.mouseMove(px, py);
-                            Thread.sleep(40);
-
-                            for (int ci=0; ci<pClicks; ci++) {
+                            int[] pt=points.get(pi);
+                            int px=pt[0],py=pt[1],pClicks=pt[2],pSubDelay=pt[3],pDelay=pt[4];
+                            hudPointIndex=pi; hudSubClickTotal=pClicks;
+                            robot.mouseMove(px,py); Thread.sleep(40);
+                            for (int ci=0;ci<pClicks;ci++) {
                                 if (!running) break outer;
-                                hudSubClickIndex = ci;
-                                doClick(robot, button, isDouble);
+                                hudSubClickIndex=ci;
+                                doClick(robot,button,isDouble);
                                 clickCount++;
                                 final long c=clickCount;
                                 SwingUtilities.invokeLater(() -> clickCountLabel.setText("Clicks: "+c));
-
-                                if (ci < pClicks-1) {
-                                    // countdown sub-click delay
-                                    long end = System.currentTimeMillis() + pSubDelay;
-                                    while (System.currentTimeMillis() < end && running) {
-                                        hudSubDelayLeft = end - System.currentTimeMillis();
-                                        Thread.sleep(Math.min(50, hudSubDelayLeft+1));
-                                    }
-                                    hudSubDelayLeft = 0;
+                                if (ci<pClicks-1) {
+                                    long end=System.currentTimeMillis()+pSubDelay;
+                                    while (System.currentTimeMillis()<end&&running) { hudSubDelayLeft=end-System.currentTimeMillis(); Thread.sleep(Math.min(50,hudSubDelayLeft+1)); }
+                                    hudSubDelayLeft=0;
                                 }
                             }
-
-                            // countdown delay-after
-                            long end = System.currentTimeMillis() + pDelay;
-                            while (System.currentTimeMillis() < end && running) {
-                                hudNextPointLeft = end - System.currentTimeMillis();
-                                Thread.sleep(Math.min(50, hudNextPointLeft+1));
-                            }
-                            hudNextPointLeft = 0;
+                            long end=System.currentTimeMillis()+pDelay;
+                            while (System.currentTimeMillis()<end&&running) { hudNextPointLeft=end-System.currentTimeMillis(); Thread.sleep(Math.min(50,hudNextPointLeft+1)); }
+                            hudNextPointLeft=0;
                         }
                     } else {
-                        hudPointIndex=0; hudPointTotal=0;
-                        hudSubClickIndex=0; hudSubClickTotal=1;
-                        doClick(robot, button, isDouble);
-                        clickCount++;
+                        hudPointIndex=0; hudPointTotal=0; hudSubClickIndex=0; hudSubClickTotal=1;
+                        doClick(robot,button,isDouble); clickCount++;
                         final long c=clickCount;
                         SwingUtilities.invokeLater(() -> clickCountLabel.setText("Clicks: "+c));
-
-                        long end = System.currentTimeMillis()+globalInterval;
-                        while (System.currentTimeMillis()<end && running) {
-                            hudNextPointLeft = end-System.currentTimeMillis();
-                            Thread.sleep(Math.min(50, hudNextPointLeft+1));
-                        }
+                        long end=System.currentTimeMillis()+globalInterval;
+                        while (System.currentTimeMillis()<end&&running) { hudNextPointLeft=end-System.currentTimeMillis(); Thread.sleep(Math.min(50,hudNextPointLeft+1)); }
                         hudNextPointLeft=0;
-
-                        // in cursor mode, maxClicks = total individual clicks
-                        if (maxClicksSetting>0 && clickCount>=maxClicksSetting) { stopClicking(); break; }
+                        if (maxClicksSetting>0&&clickCount>=maxClicksSetting) { stopClicking(); break; }
                     }
                 }
             } catch (Exception ex) { ex.printStackTrace(); }
@@ -761,114 +946,68 @@ public class TurboClick implements NativeKeyListener {
         }).start();
     }
 
-    static void doClick(Robot r, int btn, boolean dbl) throws InterruptedException {
+    static void doClick(Robot r,int btn,boolean dbl) throws InterruptedException {
         r.mousePress(btn); r.mouseRelease(btn);
         if (dbl) { Thread.sleep(40); r.mousePress(btn); r.mouseRelease(btn); }
     }
 
     static void stopClicking() {
-        running = false;
-        SwingUtilities.invokeLater(() -> {
-            updateStatus("● Stopped", new Color(200,50,50));
-            hideHud();
-            frame.setVisible(true);
-            frame.toFront();
-        });
+        running=false;
+        SwingUtilities.invokeLater(() -> { updateStatus("● Stopped",new Color(200,50,50)); hideHud(); frame.setVisible(true); frame.toFront(); });
     }
 
     static int getSelectedButton() {
-        switch (mouseButtonCombo.getSelectedIndex()) {
-            case 1: return InputEvent.BUTTON3_DOWN_MASK;
-            case 2: return InputEvent.BUTTON2_DOWN_MASK;
-            default: return InputEvent.BUTTON1_DOWN_MASK;
-        }
+        switch(mouseButtonCombo.getSelectedIndex()) { case 1: return InputEvent.BUTTON3_DOWN_MASK; case 2: return InputEvent.BUTTON2_DOWN_MASK; default: return InputEvent.BUTTON1_DOWN_MASK; }
     }
-
-    static void updateStatus(String text, Color color) {
-        statusLabel.setText(text); statusLabel.setForeground(color);
-    }
+    static void updateStatus(String text,Color color){ statusLabel.setText(text); statusLabel.setForeground(color); }
 
     // =========================================================
     //  HOTKEY
     // =========================================================
     static void startListening(boolean forStartStop) {
-        if (forStartStop) {
-            listeningForHotkey=true;
-            hotkeyLabel.setText("Start/Stop: [Press any key...]");
-            changeHotkeyBtn.setEnabled(false);
-        } else {
-            listeningForSmartKey=true;
-            smartKeyLabel.setText("Smart Click: [Press any key...]");
-            changeSmartKeyBtn.setEnabled(false);
-        }
+        if (forStartStop) { listeningForHotkey=true; hotkeyLabel.setText("Start/Stop: [Press any key...]"); changeHotkeyBtn.setEnabled(false); }
+        else { listeningForSmartKey=true; smartKeyLabel.setText("Smart Click: [Press any key...]"); changeSmartKeyBtn.setEnabled(false); }
         new Thread(() -> {
             try { Thread.sleep(5000); } catch (InterruptedException ignored) {}
-            if (forStartStop&&listeningForHotkey) {
-                listeningForHotkey=false;
-                SwingUtilities.invokeLater(() -> { hotkeyLabel.setText("Start/Stop: ["+hotkeyName+"]"); changeHotkeyBtn.setEnabled(true); });
-            } else if (!forStartStop&&listeningForSmartKey) {
-                listeningForSmartKey=false;
-                SwingUtilities.invokeLater(() -> { smartKeyLabel.setText("Smart Click: ["+smartKeyName+"]"); changeSmartKeyBtn.setEnabled(true); });
-            }
+            if (forStartStop&&listeningForHotkey) { listeningForHotkey=false; SwingUtilities.invokeLater(() -> { hotkeyLabel.setText("Start/Stop: ["+hotkeyName+"]"); changeHotkeyBtn.setEnabled(true); }); }
+            else if (!forStartStop&&listeningForSmartKey) { listeningForSmartKey=false; SwingUtilities.invokeLater(() -> { smartKeyLabel.setText("Smart Click: ["+smartKeyName+"]"); changeSmartKeyBtn.setEnabled(true); }); }
         }).start();
     }
 
     @Override
     public void nativeKeyPressed(NativeKeyEvent e) {
-        if (listeningForHotkey) {
-            hotkeyKeyCode=e.getKeyCode(); hotkeyName=NativeKeyEvent.getKeyText(e.getKeyCode());
-            listeningForHotkey=false;
-            SwingUtilities.invokeLater(() -> { hotkeyLabel.setText("Start/Stop: ["+hotkeyName+"]"); changeHotkeyBtn.setEnabled(true); });
-            return;
-        }
-        if (listeningForSmartKey) {
-            smartKeyCode=e.getKeyCode(); smartKeyName=NativeKeyEvent.getKeyText(e.getKeyCode());
-            listeningForSmartKey=false;
-            SwingUtilities.invokeLater(() -> { smartKeyLabel.setText("Smart Click: ["+smartKeyName+"]"); changeSmartKeyBtn.setEnabled(true); });
-            return;
-        }
+        if (listeningForHotkey) { hotkeyKeyCode=e.getKeyCode(); hotkeyName=NativeKeyEvent.getKeyText(e.getKeyCode()); listeningForHotkey=false; SwingUtilities.invokeLater(() -> { hotkeyLabel.setText("Start/Stop: ["+hotkeyName+"]"); changeHotkeyBtn.setEnabled(true); }); return; }
+        if (listeningForSmartKey) { smartKeyCode=e.getKeyCode(); smartKeyName=NativeKeyEvent.getKeyText(e.getKeyCode()); listeningForSmartKey=false; SwingUtilities.invokeLater(() -> { smartKeyLabel.setText("Smart Click: ["+smartKeyName+"]"); changeSmartKeyBtn.setEnabled(true); }); return; }
         if (e.getKeyCode()==smartKeyCode)  { SwingUtilities.invokeLater(TurboClick::toggleSmartMode); return; }
-        if (e.getKeyCode()==hotkeyKeyCode) { if (running) stopClicking(); else startClicking(); }
+        if (e.getKeyCode()==hotkeyKeyCode) { if(running) stopClicking(); else startClicking(); }
     }
-
     @Override public void nativeKeyReleased(NativeKeyEvent e) {}
     @Override public void nativeKeyTyped(NativeKeyEvent e) {}
 
     // =========================================================
     //  UI HELPERS
     // =========================================================
-    static JSpinner makeSpinner(int val, int min, int max) {
+    static JSpinner makeSpinner(int val,int min,int max){
         JSpinner sp=new JSpinner(new SpinnerNumberModel(val,min,max,1));
-        sp.setFont(new Font("SansSerif",Font.PLAIN,12));
-        sp.setPreferredSize(new Dimension(55,28));
+        sp.setFont(new Font("SansSerif",Font.PLAIN,12)); sp.setPreferredSize(new Dimension(55,28));
         ((JSpinner.DefaultEditor)sp.getEditor()).getTextField().setHorizontalAlignment(JTextField.CENTER);
         return sp;
     }
     static JLabel makeLabel(String t){ JLabel l=new JLabel(t); l.setFont(new Font("SansSerif",Font.PLAIN,12)); return l; }
     static JTextField makeField(String v){
-        JTextField f=new JTextField(v,8);
-        f.setFont(new Font("SansSerif",Font.PLAIN,12));
-        f.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(180,180,180)),
-            BorderFactory.createEmptyBorder(3,6,3,6)));
+        JTextField f=new JTextField(v,8); f.setFont(new Font("SansSerif",Font.PLAIN,12));
+        f.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(180,180,180)),BorderFactory.createEmptyBorder(3,6,3,6)));
         return f;
     }
-    static JComboBox<String> makeCombo(String[] items){
-        JComboBox<String> c=new JComboBox<>(items);
-        c.setFont(new Font("SansSerif",Font.PLAIN,12)); c.setBackground(Color.WHITE); return c;
-    }
-    static JButton makeActionButton(String text, Color bg){
-        JButton b=new JButton(text);
-        b.setFont(new Font("SansSerif",Font.PLAIN,11));
+    static JComboBox<String> makeCombo(String[] items){ JComboBox<String> c=new JComboBox<>(items); c.setFont(new Font("SansSerif",Font.PLAIN,12)); c.setBackground(Color.WHITE); return c; }
+    static JButton makeActionButton(String text,Color bg){
+        JButton b=new JButton(text); b.setFont(new Font("SansSerif",Font.PLAIN,11));
         b.setBackground(bg); b.setForeground(Color.WHITE); b.setOpaque(true);
         b.setFocusPainted(false); b.setBorderPainted(false);
-        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        return b;
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)); return b;
     }
     static TitledBorder makeTitledBorder(String t){
-        return BorderFactory.createTitledBorder(
-            BorderFactory.createLineBorder(new Color(200,200,200)),t,
-            TitledBorder.LEFT,TitledBorder.TOP,
-            new Font("SansSerif",Font.BOLD,11),new Color(80,80,80));
+        return BorderFactory.createTitledBorder(BorderFactory.createLineBorder(new Color(200,200,200)),t,
+            TitledBorder.LEFT,TitledBorder.TOP,new Font("SansSerif",Font.BOLD,11),new Color(80,80,80));
     }
 }
