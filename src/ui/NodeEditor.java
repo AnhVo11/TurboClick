@@ -4,43 +4,51 @@ import nodes.BaseNode;
 import nodes.BaseNode.NodePort;
 import javax.swing.*;
 import javax.swing.border.*;
+import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.image.BufferedImage;
 
-/**
- * NodeEditor — right panel.
- * Shows editable properties for the currently selected node.
- * Dynamically rebuilds based on node type.
- */
 public class NodeEditor extends JPanel {
 
-    private BaseNode    currentNode;
-    private NodeCanvas  canvas;
-    private JPanel      content;
-    private JScrollPane scroll;
+    private static final Color BG       = new Color(28, 28, 38);
+    private static final Color BG_DARK  = new Color(22, 22, 30);
+    private static final Color BORDER_C = new Color(50, 50, 65);
+    private static final Color TEXT     = new Color(220, 220, 230);
+    private static final Color TEXT_DIM = new Color(120, 120, 150);
+    private static final Color ACCENT   = new Color(80, 140, 255);
+    private static final Color INPUT_BG = new Color(35, 35, 50);
+    private static final Color INPUT_BD = new Color(60, 60, 85);
+
+    private BaseNode   currentNode;
+    private NodeCanvas canvas;
+    private JPanel     content;
+
+    private JLabel    templatePreview;
+    private JLabel    zoneStatusLabel;
+    private JCheckBox sameAsCaptureCb;
 
     public NodeEditor() {
-        setBackground(new Color(28, 28, 38));
-        setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, new Color(50, 50, 65)));
+        setBackground(BG);
+        setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, BORDER_C));
         setLayout(new BorderLayout());
 
-        // Header
         JLabel header = new JLabel("  NODE EDITOR");
-        header.setForeground(new Color(120, 120, 150));
+        header.setForeground(TEXT_DIM);
         header.setFont(new Font("SansSerif", Font.BOLD, 10));
         header.setBorder(new EmptyBorder(10, 8, 8, 0));
-        header.setBackground(new Color(22, 22, 30));
+        header.setBackground(BG_DARK);
         header.setOpaque(true);
         add(header, BorderLayout.NORTH);
 
         content = new JPanel();
-        content.setBackground(new Color(28, 28, 38));
+        content.setBackground(BG);
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 
-        scroll = new JScrollPane(content);
-        scroll.setBackground(new Color(28, 28, 38));
+        JScrollPane scroll = new JScrollPane(content);
+        scroll.setBackground(BG);
         scroll.setBorder(null);
-        scroll.getViewport().setBackground(new Color(28, 28, 38));
+        scroll.getViewport().setBackground(BG);
         add(scroll, BorderLayout.CENTER);
 
         showEmpty();
@@ -55,7 +63,7 @@ public class NodeEditor extends JPanel {
     private void showEmpty() {
         content.removeAll();
         JLabel lbl = new JLabel("<html><center><br><br>Select a node<br>to edit its<br>properties</center></html>");
-        lbl.setForeground(new Color(80, 80, 100));
+        lbl.setForeground(new Color(70, 70, 90));
         lbl.setFont(new Font("SansSerif", Font.ITALIC, 12));
         lbl.setHorizontalAlignment(SwingConstants.CENTER);
         lbl.setAlignmentX(CENTER_ALIGNMENT);
@@ -69,13 +77,11 @@ public class NodeEditor extends JPanel {
         content.removeAll();
         content.add(Box.createVerticalStrut(8));
 
-        // ── Node identity ─────────────────────────────────────
         addSection("Identity");
         addLabeledField("Label", currentNode.label, val -> {
             currentNode.label = val; canvas.refreshNode(currentNode);
         });
 
-        // ── General options ───────────────────────────────────
         addSection("Branch Options");
         addCheckBox("Enabled", currentNode.branchEnabled, val -> {
             currentNode.branchEnabled = val; canvas.refreshNode(currentNode);
@@ -83,7 +89,6 @@ public class NodeEditor extends JPanel {
         addCheckBox("Log transitions", currentNode.logTransition, val -> currentNode.logTransition = val);
         addLabeledSpinner("Entry delay (ms)", currentNode.entryDelayMs, 0, 60000, val -> currentNode.entryDelayMs = val);
 
-        // ── Type-specific options ─────────────────────────────
         switch (currentNode.type) {
             case WATCH_ZONE:   buildWatchZone();   break;
             case CLICK:        buildClick();        break;
@@ -94,15 +99,14 @@ public class NodeEditor extends JPanel {
             case STOP:         buildStop();         break;
         }
 
-        // ── Output ports ─────────────────────────────────────
         if (!currentNode.outputs.isEmpty()) {
             addSection("Output Ports");
             for (NodePort port : currentNode.outputs) {
-                addLabeledField("Arrow label: "+port.name, port.displayLabel(), val -> {
+                addLabeledField("Label: "+port.name, port.displayLabel(), val -> {
                     port.customLabel = val; canvas.refreshNode(currentNode);
                 });
-                addCheckBox("Port enabled: "+port.name, port.enabled, val -> port.enabled = val);
-                addLabeledSpinner("Arrow delay ms: "+port.name, port.arrowDelayMs, 0, 60000, val -> port.arrowDelayMs = val);
+                addCheckBox("Enabled: "+port.name, port.enabled, val -> port.enabled = val);
+                addLabeledSpinner("Delay ms: "+port.name, port.arrowDelayMs, 0, 60000, val -> port.arrowDelayMs = val);
             }
         }
 
@@ -110,71 +114,379 @@ public class NodeEditor extends JPanel {
         revalidate(); repaint();
     }
 
-    // ── Type builders ─────────────────────────────────────────
+    // =========================================================
+    //  WATCH ZONE
+    // =========================================================
     private void buildWatchZone() {
-        // Cast via reflection-friendly approach — use field names via casting
-        // We access fields by casting to the concrete type stored in NodeFactory
-        // Since inner classes are package-private, we access via BaseNode fields set by getters
-        addSection("Watch Zone Settings");
-        addInfo("📷 Capture Button — use Zone Selector");
-        addLabeledSpinner("Match % threshold", getIntField("matchThreshold", 85), 10, 100, val -> setIntField("matchThreshold", val));
-        addLabeledSpinner("Poll interval (ms)", getIntField("pollIntervalMs", 500), 50, 10000, val -> setIntField("pollIntervalMs", val));
-        addLabeledSpinner("Pre-trigger delay (ms)", getIntField("preTriggerDelayMs", 0), 0, 10000, val -> setIntField("preTriggerDelayMs", val));
-        addLabeledSpinner("Timeout (ms, 0=∞)", getIntField("timeoutMs", 0), 0, 60000, val -> setIntField("timeoutMs", val));
-        addLabeledSpinner("Retry count", getIntField("retryCount", 0), 0, 100, val -> setIntField("retryCount", val));
-        addCheckBox("Click at match location", getBoolField("clickAtMatch", true), val -> setBoolField("clickAtMatch", val));
-        addLabeledSpinner("Click X (if custom)", getIntField("clickX", 0), -9999, 9999, val -> setIntField("clickX", val));
-        addLabeledSpinner("Click Y (if custom)", getIntField("clickY", 0), -9999, 9999, val -> setIntField("clickY", val));
+        addSection("Image Name");
+        addLabeledField("Name", getStrField("imageName","Unnamed Image"), val -> setStrField("imageName", val));
+
+        addSection("Capture Template");
+
+        templatePreview = new JLabel("No image captured");
+        templatePreview.setForeground(TEXT_DIM);
+        templatePreview.setFont(new Font("SansSerif", Font.ITALIC, 10));
+        templatePreview.setHorizontalAlignment(SwingConstants.CENTER);
+        templatePreview.setPreferredSize(new Dimension(220, 60));
+        templatePreview.setMaximumSize(new Dimension(240, 60));
+        templatePreview.setAlignmentX(LEFT_ALIGNMENT);
+        templatePreview.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(BORDER_C), BorderFactory.createEmptyBorder(4,4,4,4)));
+        templatePreview.setBackground(new Color(20,20,30));
+        templatePreview.setOpaque(true);
+
+        BufferedImage existing = (BufferedImage) getObjField("template");
+        if (existing != null) updatePreview(existing);
+
+        JPanel previewRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        previewRow.setBackground(BG); previewRow.setAlignmentX(LEFT_ALIGNMENT);
+        previewRow.add(templatePreview);
+        content.add(previewRow);
+
+        JButton captureBtn = editorBtn("Capture Template", new Color(50,100,170));
+        captureBtn.setAlignmentX(LEFT_ALIGNMENT);
+        JPanel capRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        capRow.setBackground(BG); capRow.setAlignmentX(LEFT_ALIGNMENT);
+        capRow.add(captureBtn);
+        content.add(capRow);
+        captureBtn.addActionListener(e -> startCapture(true));
+
+        addSection("Watch Zone");
+
+        sameAsCaptureCb = new JCheckBox("Use same area as captured template");
+        sameAsCaptureCb.setBackground(BG); sameAsCaptureCb.setForeground(TEXT);
+        sameAsCaptureCb.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        sameAsCaptureCb.setBorder(new EmptyBorder(2,8,2,0));
+        sameAsCaptureCb.setAlignmentX(LEFT_ALIGNMENT);
+        sameAsCaptureCb.setSelected(getBoolField("sameAsCapture", false));
+        content.add(sameAsCaptureCb);
+
+        zoneStatusLabel = new JLabel();
+        zoneStatusLabel.setFont(new Font("SansSerif", Font.ITALIC, 10));
+        zoneStatusLabel.setAlignmentX(LEFT_ALIGNMENT);
+        zoneStatusLabel.setBorder(new EmptyBorder(0,8,0,0));
+        refreshZoneStatus();
+        content.add(zoneStatusLabel);
+
+        JButton setZoneBtn = editorBtn("Set Watch Zone", new Color(50,130,80));
+        setZoneBtn.setAlignmentX(LEFT_ALIGNMENT);
+        JPanel zoneRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        zoneRow.setBackground(BG); zoneRow.setAlignmentX(LEFT_ALIGNMENT);
+        zoneRow.add(setZoneBtn);
+        content.add(zoneRow);
+
+        sameAsCaptureCb.addActionListener(e -> {
+            boolean same = sameAsCaptureCb.isSelected();
+            setBoolField("sameAsCapture", same);
+            setZoneBtn.setEnabled(!same);
+            if (same) applySameAsCapture();
+            refreshZoneStatus();
+        });
+        setZoneBtn.setEnabled(!getBoolField("sameAsCapture", false));
+        setZoneBtn.addActionListener(e -> startCapture(false));
+
+        addSection("Match Settings");
+        addLabeledSpinner("Match % threshold",     getIntField("matchThreshold",85),    10, 100,   val -> setIntField("matchThreshold", val));
+        addLabeledSpinner("Poll interval (ms)",    getIntField("pollIntervalMs",500),    50, 10000, val -> setIntField("pollIntervalMs", val));
+        addLabeledSpinner("Pre-trigger delay (ms)",getIntField("preTriggerDelayMs",0),   0,  10000, val -> setIntField("preTriggerDelayMs", val));
+        addLabeledSpinner("Timeout (ms, 0=inf)",   getIntField("timeoutMs",0),           0,  60000, val -> setIntField("timeoutMs", val));
+        addLabeledSpinner("Retry count",           getIntField("retryCount",0),          0,  100,   val -> setIntField("retryCount", val));
     }
 
+    private void startCapture(boolean isTemplate) {
+        Window win = SwingUtilities.getWindowAncestor(this);
+        if (win != null) win.setVisible(false);
+        Timer delay = new Timer(300, ev -> showOverlay(isTemplate, win));
+        delay.setRepeats(false); delay.start();
+    }
+
+    private void showOverlay(boolean isTemplate, Window parentWindow) {
+        JWindow overlay = new JWindow();
+        overlay.setAlwaysOnTop(true);
+        overlay.setBackground(new Color(0,0,0,0));
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        overlay.setBounds(0, 0, screen.width, screen.height);
+
+        int[] drag = {0,0,0,0};
+        boolean[] dragging = {false};
+
+        JPanel glass = new JPanel() {
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g;
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(0,0,0,80)); g2.fillRect(0,0,getWidth(),getHeight());
+                String msg = isTemplate
+                    ? "Drag to select the BUTTON IMAGE to detect   [ESC = cancel]"
+                    : "Drag to select the WATCH ZONE scan area     [ESC = cancel]";
+                g2.setFont(new Font("SansSerif",Font.BOLD,16));
+                FontMetrics fm = g2.getFontMetrics(); int tw = fm.stringWidth(msg);
+                g2.setColor(new Color(0,0,0,160));
+                g2.fillRoundRect((getWidth()-tw)/2-12,18,tw+24,34,10,10);
+                g2.setColor(isTemplate ? new Color(100,180,255) : new Color(100,255,160));
+                g2.drawString(msg,(getWidth()-tw)/2,40);
+                if (dragging[0]) {
+                    int rx=Math.min(drag[0],drag[2]),ry=Math.min(drag[1],drag[3]);
+                    int rw=Math.abs(drag[2]-drag[0]),rh=Math.abs(drag[3]-drag[1]);
+                    Composite old=g2.getComposite();
+                    g2.setComposite(AlphaComposite.Clear); g2.fillRect(rx,ry,rw,rh);
+                    g2.setComposite(old);
+                    Color bc = isTemplate ? new Color(100,180,255) : new Color(100,255,160);
+                    g2.setColor(bc); g2.setStroke(new BasicStroke(2)); g2.drawRect(rx,ry,rw,rh);
+                    g2.setFont(new Font("Monospaced",Font.BOLD,11));
+                    g2.drawString(rw+"x"+rh+"  ("+rx+","+ry+")", rx+4, ry>20?ry-4:ry+rh+16);
+                }
+            }
+        };
+        glass.setOpaque(false);
+        glass.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+        glass.setFocusable(true);
+
+        glass.addMouseListener(new MouseAdapter() {
+            public void mousePressed(MouseEvent e) {
+                drag[0]=e.getX(); drag[1]=e.getY();
+                drag[2]=e.getX(); drag[3]=e.getY(); dragging[0]=true;
+            }
+            public void mouseReleased(MouseEvent e) {
+                drag[2]=e.getX(); drag[3]=e.getY();
+                int rx=Math.min(drag[0],drag[2]),ry=Math.min(drag[1],drag[3]);
+                int rw=Math.abs(drag[2]-drag[0]),rh=Math.abs(drag[3]-drag[1]);
+                overlay.dispose();
+                if (rw<4||rh<4) { if(parentWindow!=null) parentWindow.setVisible(true); return; }
+                Timer t = new Timer(150, ev -> {
+                    try {
+                        java.awt.Robot robot = new java.awt.Robot();
+                        java.awt.Rectangle rect = new java.awt.Rectangle(rx,ry,rw,rh);
+                        BufferedImage capture = robot.createScreenCapture(rect);
+                        if (isTemplate) {
+                            setObjField("template", capture);
+                            setObjField("captureRect", rect);
+                            SwingUtilities.invokeLater(() -> {
+                                updatePreview(capture);
+                                if (getBoolField("sameAsCapture",false)) applySameAsCapture();
+                                else refreshZoneStatus();
+                            });
+                        } else {
+                            setObjField("watchZone", rect);
+                            SwingUtilities.invokeLater(NodeEditor.this::refreshZoneStatus);
+                        }
+                    } catch (Exception ex) { ex.printStackTrace(); }
+                    if (parentWindow!=null) { parentWindow.setVisible(true); parentWindow.toFront(); }
+                });
+                t.setRepeats(false); t.start();
+            }
+        });
+        glass.addMouseMotionListener(new MouseMotionAdapter() {
+            public void mouseDragged(MouseEvent e) { drag[2]=e.getX(); drag[3]=e.getY(); glass.repaint(); }
+        });
+        glass.addKeyListener(new KeyAdapter() {
+            public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode()==KeyEvent.VK_ESCAPE) {
+                    overlay.dispose();
+                    if (parentWindow!=null) { parentWindow.setVisible(true); parentWindow.toFront(); }
+                }
+            }
+        });
+
+        overlay.setContentPane(glass);
+        overlay.setVisible(true);
+        glass.requestFocusInWindow();
+    }
+
+    private void applySameAsCapture() {
+        Object r = getObjField("captureRect");
+        if (r instanceof java.awt.Rectangle) setObjField("watchZone", r);
+        refreshZoneStatus();
+    }
+
+    private void refreshZoneStatus() {
+        if (zoneStatusLabel==null) return;
+        Object zone = getObjField("watchZone");
+        if (zone instanceof java.awt.Rectangle) {
+            java.awt.Rectangle r = (java.awt.Rectangle) zone;
+            String tag = getBoolField("sameAsCapture",false) ? " (same as capture)" : "";
+            zoneStatusLabel.setText("Zone: "+r.x+","+r.y+"  "+r.width+"x"+r.height+"px"+tag);
+            zoneStatusLabel.setForeground(new Color(80,200,120));
+        } else {
+            zoneStatusLabel.setText("No zone set");
+            zoneStatusLabel.setForeground(TEXT_DIM);
+        }
+    }
+
+    private void updatePreview(BufferedImage img) {
+        if (templatePreview==null||img==null) return;
+        int pw=220,ph=56;
+        double scale=Math.min((double)pw/img.getWidth(),(double)ph/img.getHeight());
+        int sw=(int)(img.getWidth()*scale),sh=(int)(img.getHeight()*scale);
+        Image scaled=img.getScaledInstance(sw,sh,Image.SCALE_SMOOTH);
+        templatePreview.setIcon(new ImageIcon(scaled));
+        templatePreview.setText("");
+        templatePreview.revalidate(); templatePreview.repaint();
+    }
+
+    // =========================================================
+    //  CLICK
+    // =========================================================
     private void buildClick() {
         addSection("Click Settings");
-        addLabeledSpinner("Click X", getIntField("clickX", 0), -9999, 9999, val -> setIntField("clickX", val));
-        addLabeledSpinner("Click Y", getIntField("clickY", 0), -9999, 9999, val -> setIntField("clickY", val));
-        addLabeledSpinner("Click count", getIntField("clickCount", 1), 1, 999, val -> setIntField("clickCount", val));
-        addLabeledSpinner("Sub-click delay (ms)", getIntField("subDelayMs", 100), 0, 10000, val -> setIntField("subDelayMs", val));
+        addLabeledSpinner("Click X",            getIntField("clickX",0),     -9999,9999,  val -> setIntField("clickX", val));
+        addLabeledSpinner("Click Y",            getIntField("clickY",0),     -9999,9999,  val -> setIntField("clickY", val));
+        addLabeledSpinner("Click count",        getIntField("clickCount",1),  1,   999,   val -> setIntField("clickCount", val));
+        addLabeledSpinner("Sub-click delay (ms)",getIntField("subDelayMs",100),0,  10000, val -> setIntField("subDelayMs", val));
         addCombo("Mouse button", new String[]{"Left","Right","Middle"}, getIntField("mouseButton",0), val -> setIntField("mouseButton", val));
-        addCheckBox("Double click", getBoolField("doubleClick", false), val -> setBoolField("doubleClick", val));
+        addCheckBox("Double click",            getBoolField("doubleClick",false),          val -> setBoolField("doubleClick", val));
+        addCheckBox("Click at last match location", getBoolField("useLastMatchLocation",false), val -> setBoolField("useLastMatchLocation", val));
     }
 
+    // =========================================================
+    //  SIMPLE CLICK
+    // =========================================================
     private void buildSimpleClick() {
-        addSection("Simple Click Settings");
-        addLabeledSpinner("Interval (ms)", (int)getLongField("intervalMs",100), 1, 60000, val -> setLongField("intervalMs", val));
-        addLabeledSpinner("Max clicks (0=∞)", (int)getLongField("maxClicks",0), 0, 99999, val -> setLongField("maxClicks", val));
+        addSection("Click Interval");
+
+        String[] units = {"H","Min","Sec","1/10","1/100","1/1000"};
+        JPanel unitHdr = new JPanel(new GridLayout(1,6,2,0));
+        unitHdr.setBackground(BG); unitHdr.setBorder(new EmptyBorder(4,8,0,8));
+        unitHdr.setAlignmentX(LEFT_ALIGNMENT);
+        for (String u : units) {
+            JLabel l = new JLabel(u, SwingConstants.CENTER);
+            l.setFont(new Font("SansSerif",Font.PLAIN,9)); l.setForeground(TEXT_DIM);
+            unitHdr.add(l);
+        }
+        content.add(unitHdr);
+
+        JPanel spRow = new JPanel(new GridLayout(1,6,2,0));
+        spRow.setBackground(BG); spRow.setBorder(new EmptyBorder(2,8,6,8));
+        spRow.setAlignmentX(LEFT_ALIGNMENT);
+
+        long iv = getLongField("intervalMs",100);
+        int ivH=(int)(iv/3600000L), ivM=(int)((iv%3600000L)/60000L);
+        int ivS=(int)((iv%60000L)/1000L), ivT=(int)((iv%1000L)/100L);
+        int ivHu=(int)((iv%100L)/10L), ivTh=(int)(iv%10L);
+
+        JSpinner[] sps = {
+            nodeSpinner(ivH,0,23), nodeSpinner(ivM,0,59), nodeSpinner(ivS,0,59),
+            nodeSpinner(ivT,0,9),  nodeSpinner(ivHu,0,9), nodeSpinner(ivTh,0,9)
+        };
+        for (JSpinner sp : sps) spRow.add(sp);
+        for (JSpinner sp : sps) sp.addChangeListener(e -> {
+            long h=((Number)sps[0].getValue()).longValue(), m=((Number)sps[1].getValue()).longValue();
+            long s=((Number)sps[2].getValue()).longValue(), t=((Number)sps[3].getValue()).longValue();
+            long hu=((Number)sps[4].getValue()).longValue(), th=((Number)sps[5].getValue()).longValue();
+            setLongField("intervalMs", Math.max(1, h*3600000L+m*60000L+s*1000L+t*100L+hu*10L+th));
+        });
+        content.add(spRow);
+
+        addSection("Click Settings");
+        addLabeledSpinner("Max clicks (0=inf)", (int)getLongField("maxClicks",0), 0, 99999, val -> setLongField("maxClicks", val));
         addCombo("Mouse button", new String[]{"Left","Right","Middle"}, getIntField("mouseButton",0), val -> setIntField("mouseButton", val));
-        addCheckBox("Double click", getBoolField("doubleClick",false), val -> setBoolField("doubleClick", val));
+        addCheckBox("Double click",         getBoolField("doubleClick",false),          val -> setBoolField("doubleClick", val));
+        addCheckBox("Click at last match",  getBoolField("useLastMatchLocation",false),  val -> setBoolField("useLastMatchLocation", val));
+
+        addSection("Click Points");
+        addInfo("Empty = click at cursor position");
+
+        String[] cols = {"#","X","Y","Clicks","Sub-ms","After-ms"};
+        DefaultTableModel tm = new DefaultTableModel(cols, 0) {
+            public boolean isCellEditable(int r, int c) { return c > 0; }
+        };
+        java.util.List<int[]> pts = getPointsField();
+        for (int i = 0; i < pts.size(); i++) {
+            int[] p = pts.get(i);
+            tm.addRow(new Object[]{i+1, p[0], p[1], p[2], p[3], p[4]});
+        }
+
+        JTable tbl = new JTable(tm);
+        tbl.setFont(new Font("SansSerif",Font.PLAIN,11)); tbl.setRowHeight(22);
+        tbl.setBackground(new Color(32,32,44)); tbl.setForeground(new Color(220,220,230));
+        tbl.setGridColor(new Color(45,45,60));
+        tbl.setSelectionBackground(new Color(50,80,140)); tbl.setSelectionForeground(Color.WHITE);
+        tbl.getTableHeader().setBackground(new Color(35,35,50));
+        tbl.getTableHeader().setForeground(new Color(120,120,150));
+        tbl.getTableHeader().setFont(new Font("SansSerif",Font.BOLD,9));
+        int[] cw = {18,45,45,40,50,55};
+        for (int i=0;i<cw.length;i++) tbl.getColumnModel().getColumn(i).setPreferredWidth(cw[i]);
+        tm.addTableModelListener(e -> syncPointsToNode(tm));
+
+        JScrollPane tblScroll = new JScrollPane(tbl);
+        tblScroll.setPreferredSize(new Dimension(240,100));
+        tblScroll.setMaximumSize(new Dimension(260,100));
+        tblScroll.setBorder(BorderFactory.createLineBorder(new Color(50,50,65)));
+        tblScroll.getViewport().setBackground(new Color(32,32,44));
+        tblScroll.setAlignmentX(LEFT_ALIGNMENT);
+        content.add(Box.createVerticalStrut(4));
+        content.add(tblScroll);
+
+        JPanel tblBtns = new JPanel(new FlowLayout(FlowLayout.LEFT,4,4));
+        tblBtns.setBackground(BG); tblBtns.setAlignmentX(LEFT_ALIGNMENT);
+        JButton addBtn = editorBtn("+ Add",   new Color(50,100,160));
+        JButton remBtn = editorBtn("- Remove",new Color(130,40,40));
+        JButton clrBtn = editorBtn("Clear",   new Color(55,55,75));
+
+        addBtn.addActionListener(e -> {
+            Point mouse = MouseInfo.getPointerInfo().getLocation();
+            tm.addRow(new Object[]{tm.getRowCount()+1, mouse.x, mouse.y, 1, 100, 100});
+            syncPointsToNode(tm);
+        });
+        remBtn.addActionListener(e -> {
+            int row = tbl.getSelectedRow();
+            if (row>=0) {
+                tm.removeRow(row);
+                for (int i=0;i<tm.getRowCount();i++) tm.setValueAt(i+1,i,0);
+                syncPointsToNode(tm);
+            }
+        });
+        clrBtn.addActionListener(e -> { tm.setRowCount(0); syncPointsToNode(tm); });
+        tblBtns.add(addBtn); tblBtns.add(remBtn); tblBtns.add(clrBtn);
+        content.add(tblBtns);
+
         addSection("Execution");
-        addCheckBox("Wait to finish", getBoolField("waitToFinish",true), val -> setBoolField("waitToFinish", val));
-        addCheckBox("Run in background", getBoolField("runInBackground",false), val -> setBoolField("runInBackground", val));
-        addCheckBox("Repeat until stopped", getBoolField("repeatUntilStopped",false), val -> setBoolField("repeatUntilStopped", val));
-        addLabeledSpinner("Repeat times", getIntField("repeatTimes",1), 1, 9999, val -> setIntField("repeatTimes", val));
+        addCheckBox("Wait to finish",       getBoolField("waitToFinish",true),        val -> setBoolField("waitToFinish", val));
+        addCheckBox("Run in background",    getBoolField("runInBackground",false),     val -> setBoolField("runInBackground", val));
+        addCheckBox("Repeat until stopped", getBoolField("repeatUntilStopped",false),  val -> setBoolField("repeatUntilStopped", val));
+        addLabeledSpinner("Repeat times",   getIntField("repeatTimes",1), 1, 9999,     val -> setIntField("repeatTimes", val));
     }
 
+    // =========================================================
+    //  CONDITION
+    // =========================================================
     private void buildCondition() {
         addSection("Condition Settings");
-        addInfo("Uses Watch Zone image match.");
+        addInfo("Capture an image to check for.");
         addLabeledSpinner("Match % threshold", getIntField("matchThreshold",85), 10, 100, val -> setIntField("matchThreshold", val));
+        JButton captureBtn = editorBtn("Capture Image", new Color(50,100,170));
+        captureBtn.setAlignmentX(LEFT_ALIGNMENT);
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT,8,2));
+        row.setBackground(BG); row.setAlignmentX(LEFT_ALIGNMENT); row.add(captureBtn);
+        content.add(row);
+        captureBtn.addActionListener(e -> startCapture(true));
     }
 
+    // =========================================================
+    //  LOOP
+    // =========================================================
     private void buildLoop() {
         addSection("Loop Settings");
-        addCombo("Loop mode", new String[]{"Fixed count","Until found","Until not found","Forever"},
-            0, val -> {});
-        addLabeledSpinner("Loop count", getIntField("loopCount",3), 1, 9999, val -> setIntField("loopCount", val));
-        addLabeledSpinner("Loop delay (ms)", getIntField("loopDelayMs",0), 0, 60000, val -> setIntField("loopDelayMs", val));
-        addLabeledSpinner("Match %", getIntField("matchThreshold",85), 10, 100, val -> setIntField("matchThreshold", val));
+        addCombo("Loop mode", new String[]{"Fixed count","Until found","Until not found","Forever"}, 0, val -> {});
+        addLabeledSpinner("Loop count",     getIntField("loopCount",3),   1,    9999,  val -> setIntField("loopCount", val));
+        addLabeledSpinner("Loop delay (ms)",getIntField("loopDelayMs",0), 0,   60000,  val -> setIntField("loopDelayMs", val));
+        addLabeledSpinner("Match %",        getIntField("matchThreshold",85), 10, 100, val -> setIntField("matchThreshold", val));
     }
 
+    // =========================================================
+    //  WAIT
+    // =========================================================
     private void buildWait() {
         addSection("Wait Settings");
-        addCombo("Wait mode", new String[]{"Fixed delay","Until found","Until not found"},
-            0, val -> {});
-        addLabeledSpinner("Delay (ms)", getIntField("delayMs",1000), 1, 600000, val -> setIntField("delayMs", val));
-        addLabeledSpinner("Timeout (ms, 0=∞)", getIntField("timeoutMs",0), 0, 60000, val -> setIntField("timeoutMs", val));
-        addLabeledSpinner("Poll interval (ms)", getIntField("pollMs",500), 50, 10000, val -> setIntField("pollMs", val));
-        addLabeledSpinner("Match %", getIntField("matchThreshold",85), 10, 100, val -> setIntField("matchThreshold", val));
+        addCombo("Wait mode", new String[]{"Fixed delay","Until found","Until not found"}, 0, val -> {});
+        addLabeledSpinner("Delay (ms)",         getIntField("delayMs",1000),  1,  600000, val -> setIntField("delayMs", val));
+        addLabeledSpinner("Timeout (ms, 0=inf)",getIntField("timeoutMs",0),   0,   60000, val -> setIntField("timeoutMs", val));
+        addLabeledSpinner("Poll interval (ms)", getIntField("pollMs",500),    50,  10000, val -> setIntField("pollMs", val));
+        addLabeledSpinner("Match %",            getIntField("matchThreshold",85), 10, 100, val -> setIntField("matchThreshold", val));
     }
 
+    // =========================================================
+    //  STOP
+    // =========================================================
     private void buildStop() {
         addSection("Stop Settings");
         addCombo("Stop mode", new String[]{"This tree only","All trees"}, 0, val -> {});
@@ -182,106 +494,131 @@ public class NodeEditor extends JPanel {
         addLabeledField("Custom message", getStrField("customMessage",""), val -> setStrField("customMessage", val));
     }
 
-    // ── Reflection field helpers ──────────────────────────────
+    // =========================================================
+    //  REFLECTION HELPERS
+    // =========================================================
     private int getIntField(String name, int def) {
         try { return (int) currentNode.getClass().getField(name).get(currentNode); }
         catch (Exception e) { return def; }
     }
     private void setIntField(String name, int val) {
-        try { currentNode.getClass().getField(name).set(currentNode, val); }
-        catch (Exception ignored) {}
+        try { currentNode.getClass().getField(name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private long getLongField(String name, long def) {
         try { return (long) currentNode.getClass().getField(name).get(currentNode); }
         catch (Exception e) { return def; }
     }
     private void setLongField(String name, long val) {
-        try { currentNode.getClass().getField(name).set(currentNode, val); }
-        catch (Exception ignored) {}
+        try { currentNode.getClass().getField(name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private boolean getBoolField(String name, boolean def) {
         try { return (boolean) currentNode.getClass().getField(name).get(currentNode); }
         catch (Exception e) { return def; }
     }
     private void setBoolField(String name, boolean val) {
-        try { currentNode.getClass().getField(name).set(currentNode, val); }
-        catch (Exception ignored) {}
+        try { currentNode.getClass().getField(name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private String getStrField(String name, String def) {
-        try { Object v = currentNode.getClass().getField(name).get(currentNode); return v != null ? v.toString() : def; }
+        try { Object v=currentNode.getClass().getField(name).get(currentNode); return v!=null?v.toString():def; }
         catch (Exception e) { return def; }
     }
     private void setStrField(String name, String val) {
-        try { currentNode.getClass().getField(name).set(currentNode, val); }
+        try { currentNode.getClass().getField(name).set(currentNode, val); } catch (Exception ignored) {}
+    }
+    private Object getObjField(String name) {
+        try { return currentNode.getClass().getField(name).get(currentNode); }
+        catch (Exception e) { return null; }
+    }
+    private void setObjField(String name, Object val) {
+        try { currentNode.getClass().getField(name).set(currentNode, val); } catch (Exception ignored) {}
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.List<int[]> getPointsField() {
+        try {
+            Object v = currentNode.getClass().getField("points").get(currentNode);
+            if (v instanceof java.util.List) return (java.util.List<int[]>) v;
+        } catch (Exception ignored) {}
+        return new java.util.ArrayList<>();
+    }
+
+    private void syncPointsToNode(DefaultTableModel tm) {
+        java.util.List<int[]> pts = new java.util.ArrayList<>();
+        for (int i=0;i<tm.getRowCount();i++) {
+            try {
+                pts.add(new int[]{
+                    Integer.parseInt(tm.getValueAt(i,1).toString()),
+                    Integer.parseInt(tm.getValueAt(i,2).toString()),
+                    Integer.parseInt(tm.getValueAt(i,3).toString()),
+                    Integer.parseInt(tm.getValueAt(i,4).toString()),
+                    Integer.parseInt(tm.getValueAt(i,5).toString())
+                });
+            } catch (Exception ignored) {}
+        }
+        try { currentNode.getClass().getField("points").set(currentNode, pts); }
         catch (Exception ignored) {}
     }
 
-    // ── UI component builders ─────────────────────────────────
+    // =========================================================
+    //  UI COMPONENT BUILDERS
+    // =========================================================
     interface IntSetter    { void set(int val); }
     interface BoolSetter   { void set(boolean val); }
     interface StringSetter { void set(String val); }
 
     private void addSection(String title) {
         JLabel lbl = new JLabel("  " + title.toUpperCase());
-        lbl.setForeground(new Color(100, 180, 255));
-        lbl.setFont(new Font("SansSerif", Font.BOLD, 10));
-        lbl.setBorder(new EmptyBorder(10, 0, 4, 0));
+        lbl.setForeground(ACCENT);
+        lbl.setFont(new Font("SansSerif",Font.BOLD,10));
+        lbl.setBorder(new EmptyBorder(10,0,4,0));
         lbl.setAlignmentX(LEFT_ALIGNMENT);
         content.add(lbl);
         JSeparator sep = new JSeparator();
-        sep.setForeground(new Color(50, 70, 90));
+        sep.setForeground(BORDER_C);
         sep.setAlignmentX(LEFT_ALIGNMENT);
         content.add(sep);
     }
 
     private void addInfo(String text) {
         JLabel lbl = new JLabel("  " + text);
-        lbl.setForeground(new Color(120, 160, 120));
-        lbl.setFont(new Font("SansSerif", Font.ITALIC, 10));
-        lbl.setBorder(new EmptyBorder(2, 0, 2, 0));
+        lbl.setForeground(new Color(100,160,100));
+        lbl.setFont(new Font("SansSerif",Font.ITALIC,10));
+        lbl.setBorder(new EmptyBorder(2,0,2,0));
         lbl.setAlignmentX(LEFT_ALIGNMENT);
         content.add(lbl);
     }
 
     private void addLabeledField(String label, String value, StringSetter setter) {
         JPanel row = rowPanel();
-        JLabel lbl = fieldLabel(label);
+        row.add(fieldLabel(label));
         JTextField tf = new JTextField(value, 10);
-        tf.setBackground(new Color(40, 40, 55));
-        tf.setForeground(new Color(220, 220, 220));
-        tf.setCaretColor(Color.WHITE);
+        tf.setBackground(INPUT_BG); tf.setForeground(TEXT); tf.setCaretColor(TEXT);
         tf.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(60, 60, 80)),
-            BorderFactory.createEmptyBorder(2, 5, 2, 5)));
-        tf.setFont(new Font("SansSerif", Font.PLAIN, 11));
+            BorderFactory.createLineBorder(INPUT_BD), BorderFactory.createEmptyBorder(2,5,2,5)));
+        tf.setFont(new Font("SansSerif",Font.PLAIN,11));
         tf.addActionListener(e -> setter.set(tf.getText()));
-        tf.addFocusListener(new FocusAdapter() {
-            public void focusLost(FocusEvent e) { setter.set(tf.getText()); }
-        });
-        row.add(lbl); row.add(tf);
-        content.add(row);
+        tf.addFocusListener(new FocusAdapter() { public void focusLost(FocusEvent e) { setter.set(tf.getText()); }});
+        row.add(tf); content.add(row);
     }
 
     private void addLabeledSpinner(String label, int value, int min, int max, IntSetter setter) {
         JPanel row = rowPanel();
-        JLabel lbl = fieldLabel(label);
-        JSpinner sp = new JSpinner(new SpinnerNumberModel(value, min, max, 1));
-        sp.setPreferredSize(new Dimension(80, 24));
-        sp.setBackground(new Color(40, 40, 55));
-        sp.setFont(new Font("SansSerif", Font.PLAIN, 11));
-        ((JSpinner.DefaultEditor)sp.getEditor()).getTextField().setBackground(new Color(40,40,55));
-        ((JSpinner.DefaultEditor)sp.getEditor()).getTextField().setForeground(new Color(220,220,220));
+        row.add(fieldLabel(label));
+        JSpinner sp = new JSpinner(new SpinnerNumberModel(value,min,max,1));
+        sp.setPreferredSize(new Dimension(80,24)); sp.setBackground(INPUT_BG);
+        sp.setFont(new Font("SansSerif",Font.PLAIN,11));
+        JSpinner.DefaultEditor ed = (JSpinner.DefaultEditor)sp.getEditor();
+        ed.getTextField().setBackground(INPUT_BG); ed.getTextField().setForeground(TEXT);
+        ed.getTextField().setBorder(BorderFactory.createLineBorder(INPUT_BD));
         sp.addChangeListener(e -> setter.set(((Number)sp.getValue()).intValue()));
-        row.add(lbl); row.add(sp);
-        content.add(row);
+        row.add(sp); content.add(row);
     }
 
     private void addCheckBox(String label, boolean value, BoolSetter setter) {
         JCheckBox cb = new JCheckBox(label, value);
-        cb.setForeground(new Color(200, 200, 210));
-        cb.setBackground(new Color(28, 28, 38));
-        cb.setFont(new Font("SansSerif", Font.PLAIN, 11));
-        cb.setBorder(new EmptyBorder(2, 8, 2, 0));
+        cb.setForeground(TEXT); cb.setBackground(BG);
+        cb.setFont(new Font("SansSerif",Font.PLAIN,11));
+        cb.setBorder(new EmptyBorder(2,8,2,0));
         cb.setAlignmentX(LEFT_ALIGNMENT);
         cb.addActionListener(e -> setter.set(cb.isSelected()));
         content.add(cb);
@@ -291,29 +628,45 @@ public class NodeEditor extends JPanel {
         JPanel row = rowPanel();
         row.add(fieldLabel(label));
         JComboBox<String> cb = new JComboBox<>(options);
-        cb.setSelectedIndex(Math.min(selected, options.length-1));
-        cb.setBackground(new Color(40,40,55));
-        cb.setForeground(new Color(220,220,220));
+        cb.setSelectedIndex(Math.min(selected,options.length-1));
+        cb.setBackground(INPUT_BG); cb.setForeground(TEXT);
         cb.setFont(new Font("SansSerif",Font.PLAIN,11));
         cb.addActionListener(e -> setter.set(cb.getSelectedIndex()));
-        row.add(cb);
-        content.add(row);
+        row.add(cb); content.add(row);
+    }
+
+    private JSpinner nodeSpinner(int val, int min, int max) {
+        JSpinner sp = new JSpinner(new SpinnerNumberModel(val,min,max,1));
+        sp.setPreferredSize(new Dimension(36,24)); sp.setBackground(INPUT_BG);
+        sp.setFont(new Font("SansSerif",Font.PLAIN,10));
+        JSpinner.DefaultEditor ed = (JSpinner.DefaultEditor)sp.getEditor();
+        ed.getTextField().setBackground(INPUT_BG); ed.getTextField().setForeground(TEXT);
+        ed.getTextField().setBorder(BorderFactory.createLineBorder(INPUT_BD));
+        ed.getTextField().setHorizontalAlignment(JTextField.CENTER);
+        return sp;
+    }
+
+    private JButton editorBtn(String text, Color bg) {
+        JButton b = new JButton(text);
+        b.setFont(new Font("SansSerif",Font.BOLD,11));
+        b.setBackground(bg); b.setForeground(Color.WHITE); b.setOpaque(true);
+        b.setFocusPainted(false); b.setBorderPainted(false);
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        b.setBorder(new EmptyBorder(6,12,6,12));
+        return b;
     }
 
     private JPanel rowPanel() {
-        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-        p.setBackground(new Color(28,28,38));
-        p.setAlignmentX(LEFT_ALIGNMENT);
+        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT,6,2));
+        p.setBackground(BG); p.setAlignmentX(LEFT_ALIGNMENT);
         return p;
     }
 
     private JLabel fieldLabel(String text) {
-        // Truncate long labels
-        String t = text.length() > 20 ? text.substring(0,18)+"…" : text;
+        String t = text.length()>22 ? text.substring(0,20)+"..." : text;
         JLabel l = new JLabel(t);
-        l.setForeground(new Color(160,160,180));
-        l.setFont(new Font("SansSerif",Font.PLAIN,10));
-        l.setPreferredSize(new Dimension(130, 20));
+        l.setForeground(TEXT_DIM); l.setFont(new Font("SansSerif",Font.PLAIN,10));
+        l.setPreferredSize(new Dimension(130,20));
         return l;
     }
 }

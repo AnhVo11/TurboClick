@@ -93,6 +93,9 @@ public class SimpleClickEngine implements Runnable {
         } catch (Exception ex) { ex.printStackTrace(); }
     }
 
+    private int lastMatchX = -1, lastMatchY = -1;
+    public void setLastMatch(int x, int y) { lastMatchX=x; lastMatchY=y; }
+
     private void doClick(Robot r, int btn) throws InterruptedException {
         r.mousePress(btn); r.mouseRelease(btn);
         if (doubleClick) { Thread.sleep(40); r.mousePress(btn); r.mouseRelease(btn); }

@@ -18,6 +18,8 @@ public class ExecutionContext {
     private          TreeStopCallback stopAllCallback;
     private          HudCallback      hudCallback;
     private          MessageCallback  msgCallback;
+    private volatile int lastMatchX = -1;
+    private volatile int lastMatchY = -1;
 
     public ExecutionContext(Robot robot, String treeId) {
         this.robot  = robot;
@@ -46,6 +48,11 @@ public class ExecutionContext {
     }
 
     // ── Message notification ─────────────────────────────────
+    public void setLastMatchX(int x) { lastMatchX = x; }
+    public void setLastMatchY(int y) { lastMatchY = y; }
+    public int  getLastMatchX()      { return lastMatchX; }
+    public int  getLastMatchY()      { return lastMatchY; }
+
     public void showMessage(String msg) {
         if (msgCallback != null) msgCallback.show(msg);
     }
