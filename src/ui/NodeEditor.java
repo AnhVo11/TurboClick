@@ -385,6 +385,16 @@ public class NodeEditor extends JPanel {
         addSection("Click Points");
         addInfo("Empty = click at cursor position");
 
+        // Smart Pin button — pick points by clicking on screen
+        JButton smartPinBtn = editorBtn("⊕  Smart Pin — pick points on screen", new Color(50,100,180));
+        smartPinBtn.setAlignmentX(LEFT_ALIGNMENT);
+        JPanel pinRow = new JPanel(new FlowLayout(FlowLayout.LEFT,8,2));
+        pinRow.setBackground(BG); pinRow.setAlignmentX(LEFT_ALIGNMENT);
+        pinRow.add(smartPinBtn);
+        content.add(pinRow);
+        // Will be wired after tm is created
+        final DefaultTableModel[] tmRef = {null};
+
         String[] cols = {"#","X","Y","Clicks","Sub-ms","After-ms"};
         DefaultTableModel tm = new DefaultTableModel(cols, 0) {
             public boolean isCellEditable(int r, int c) { return c > 0; }
@@ -406,6 +416,10 @@ public class NodeEditor extends JPanel {
         int[] cw = {18,45,45,40,50,55};
         for (int i=0;i<cw.length;i++) tbl.getColumnModel().getColumn(i).setPreferredWidth(cw[i]);
         tm.addTableModelListener(e -> syncPointsToNode(tm));
+        tmRef[0] = tm;
+
+        // Wire Smart Pin button — hides window, shows crosshair, click to add points
+        smartPinBtn.addActionListener(e -> startSmartPinSession(tmRef[0]));
 
         JScrollPane tblScroll = new JScrollPane(tbl);
         tblScroll.setPreferredSize(new Dimension(240,100));
@@ -495,48 +509,309 @@ public class NodeEditor extends JPanel {
     }
 
     // =========================================================
+    //  SMART PIN SESSION — identical UI to SimpleClickPanel
+    // =========================================================
+    private void startSmartPinSession(DefaultTableModel tm) {
+        Window win = SwingUtilities.getWindowAncestor(this);
+        if (win != null) win.setVisible(false);
+
+        // Capture node reference NOW — currentNode may change later
+        final nodes.BaseNode sessionNode = currentNode;
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        java.util.List<EditorPin> pins = new java.util.ArrayList<>();
+
+        // Restore existing points as pins
+        for (int i = 0; i < tm.getRowCount(); i++) {
+            try {
+                int px = Integer.parseInt(tm.getValueAt(i,1).toString());
+                int py = Integer.parseInt(tm.getValueAt(i,2).toString());
+                EditorPin ep = new EditorPin(px, py, i, tm);
+                pins.add(ep);
+                ep.show();
+            } catch (Exception ignored) {}
+        }
+
+        // ── Floating bar ──────────────────────────────────────
+        JWindow smartBar = new JWindow();
+        smartBar.setAlwaysOnTop(true);
+        smartBar.setBackground(new Color(0,0,0,0));
+        smartBar.setFocusableWindowState(true);
+
+        JPanel bar = new JPanel() {
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2=(Graphics2D)g;
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(15,15,22,240));
+                g2.fillRoundRect(0,0,getWidth(),getHeight(),18,18);
+                g2.setColor(new Color(80,140,255,200));
+                g2.fillRoundRect(0,0,getWidth(),3,4,4);
+            }
+        };
+        bar.setOpaque(false);
+        bar.setLayout(new FlowLayout(FlowLayout.CENTER,10,7));
+
+        JLabel dragHandle = new JLabel("⠿");
+        dragHandle.setFont(new Font("SansSerif",Font.PLAIN,16));
+        dragHandle.setForeground(new Color(100,100,130));
+        dragHandle.setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+
+        JLabel titleLbl = new JLabel("Smart Pin");
+        titleLbl.setFont(new Font("SansSerif",Font.BOLD,12));
+        titleLbl.setForeground(new Color(80,140,255));
+
+        JLabel pinCountLbl = new JLabel("Pins: "+pins.size());
+        pinCountLbl.setFont(new Font("SansSerif",Font.PLAIN,11));
+        pinCountLbl.setForeground(new Color(120,120,150));
+
+        JLabel coordsLbl = new JLabel("X: ─── Y: ───");
+        coordsLbl.setFont(new Font("Monospaced",Font.BOLD,12));
+        coordsLbl.setForeground(new Color(80,220,120));
+
+        JButton addPinBtn = smartBarBtn("+ Pin", new Color(50,100,180));
+        JButton doneBtn   = smartBarBtn("✓ Done", new Color(60,60,80));
+
+        JLabel s1=new JLabel("|"); s1.setForeground(new Color(60,60,80));
+        JLabel s2=new JLabel("|"); s2.setForeground(new Color(60,60,80));
+        JLabel s3=new JLabel("|"); s3.setForeground(new Color(60,60,80));
+
+        bar.add(dragHandle); bar.add(titleLbl);
+        bar.add(s1); bar.add(pinCountLbl);
+        bar.add(s2); bar.add(coordsLbl);
+        bar.add(s3); bar.add(addPinBtn); bar.add(doneBtn);
+
+        int[] off={0,0};
+        bar.addMouseListener(new MouseAdapter(){
+            public void mousePressed(MouseEvent e){ off[0]=e.getX(); off[1]=e.getY(); }
+        });
+        bar.addMouseMotionListener(new MouseMotionAdapter(){
+            public void mouseDragged(MouseEvent e){
+                Point loc=smartBar.getLocationOnScreen();
+                smartBar.setLocation(loc.x+e.getX()-off[0], loc.y+e.getY()-off[1]);
+            }
+        });
+
+        smartBar.setContentPane(bar);
+        smartBar.pack();
+        smartBar.setLocation(screen.width/2-smartBar.getWidth()/2, 18);
+        smartBar.setVisible(true);
+
+        // Live coords + track last mouse pos
+        int[] lastMouse = {0,0};
+        javax.swing.Timer coordTimer = new javax.swing.Timer(50, e -> {
+            Point p = MouseInfo.getPointerInfo().getLocation();
+            lastMouse[0]=p.x; lastMouse[1]=p.y;
+            coordsLbl.setText("X: "+p.x+"  Y: "+p.y);
+        });
+        coordTimer.start();
+
+        Runnable finish = () -> {
+            coordTimer.stop();
+            // Build points list from table and save directly to captured node
+            java.util.List<int[]> pts = new java.util.ArrayList<>();
+            for (int i=0;i<tm.getRowCount();i++) {
+                try {
+                    pts.add(new int[]{
+                        Integer.parseInt(tm.getValueAt(i,1).toString()),
+                        Integer.parseInt(tm.getValueAt(i,2).toString()),
+                        Integer.parseInt(tm.getValueAt(i,3).toString()),
+                        Integer.parseInt(tm.getValueAt(i,4).toString()),
+                        Integer.parseInt(tm.getValueAt(i,5).toString())
+                    });
+                } catch (Exception ignored) {}
+            }
+            try { getField(sessionNode, "points").set(sessionNode, pts); }
+            catch (Exception e) { e.printStackTrace(); }
+            for (EditorPin ep : pins) ep.dispose();
+            try { smartBar.dispose(); } catch(Exception ignored) {}
+            if (win!=null) SwingUtilities.invokeLater(() -> { win.setVisible(true); win.toFront(); });
+            javax.swing.Timer t = new javax.swing.Timer(150, e -> {
+                currentNode = sessionNode; // ensure we rebuild the right node
+                rebuild();
+            });
+            t.setRepeats(false); t.start();
+        };
+
+        doneBtn.addActionListener(ae -> finish.run());
+
+        addPinBtn.addActionListener(ae -> {
+            int px=lastMouse[0], py=lastMouse[1];
+            int row=tm.getRowCount();
+            tm.addRow(new Object[]{row+1, px, py, 1, 100, 100});
+            syncPointsToNode(tm);
+            EditorPin ep = new EditorPin(px, py, row, tm);
+            pins.add(ep);
+            ep.onRemoved = () -> {
+                pins.remove(ep);
+                // Fix rowIndex for remaining pins
+                for (int ri=0;ri<pins.size();ri++) pins.get(ri).rowIndex=ri;
+                pinCountLbl.setText("Pins: "+pins.size());
+            };
+            ep.show();
+            pinCountLbl.setText("Pins: "+pins.size());
+        });
+    }
+
+    // ── Floating pin widget (mirrors SmartPin in SimpleClickPanel) ──
+    private class EditorPin {
+        JWindow win;
+        int screenX, screenY, rowIndex;
+        DefaultTableModel tm;
+        int dragOffX, dragOffY;
+        Runnable onRemoved;
+
+        EditorPin(int x, int y, int row, DefaultTableModel tm) {
+            screenX=x; screenY=y; rowIndex=row; this.tm=tm; build();
+        }
+
+        void build() {
+            win = new JWindow();
+            win.setAlwaysOnTop(true);
+            win.setBackground(new Color(0,0,0,0));
+
+            JPanel panel = new JPanel() {
+                protected void paintComponent(Graphics g) {
+                    Graphics2D g2=(Graphics2D)g;
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                    g2.setColor(new Color(0,0,0,50));
+                    g2.fillRoundRect(3,3,getWidth()-3,getHeight()-16,12,12);
+                    g2.setColor(new Color(20,20,32,230));
+                    g2.fillRoundRect(0,0,getWidth()-3,getHeight()-13,12,12);
+                    int cx=(getWidth()-3)/2;
+                    g2.fillPolygon(new int[]{cx-7,cx+7,cx},
+                                   new int[]{getHeight()-13,getHeight()-13,getHeight()-1},3);
+                    // Red dot at tip = exact click location (4px)
+                    g2.setColor(new Color(255,60,60));
+                    g2.fillRect(cx-2, getHeight()-4, 4, 4);
+                    g2.setColor(new Color(80,140,255));
+                    g2.fillOval(4,4,20,20);
+                    g2.setColor(Color.WHITE);
+                    g2.setFont(new Font("SansSerif",Font.BOLD,11));
+                    String num=String.valueOf(rowIndex+1);
+                    FontMetrics fm=g2.getFontMetrics();
+                    g2.drawString(num,14-fm.stringWidth(num)/2,18);
+                }
+            };
+            panel.setOpaque(false);
+            panel.setLayout(new BorderLayout());
+            panel.setPreferredSize(new Dimension(140,54));
+
+            JLabel info = new JLabel(infoHtml());
+            info.setFont(new Font("SansSerif",Font.PLAIN,10));
+            info.setBorder(new EmptyBorder(4,28,14,4));
+            panel.add(info, BorderLayout.CENTER);
+
+            JLabel closeBtn = new JLabel("×");
+            closeBtn.setFont(new Font("SansSerif",Font.BOLD,13));
+            closeBtn.setForeground(new Color(180,180,200));
+            closeBtn.setBorder(new EmptyBorder(2,0,14,6));
+            closeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            closeBtn.addMouseListener(new MouseAdapter(){
+                public void mouseClicked(MouseEvent e){
+                    if (rowIndex < tm.getRowCount()) tm.removeRow(rowIndex);
+                    // refresh row numbers
+                    for (int i=0;i<tm.getRowCount();i++) tm.setValueAt(i+1,i,0);
+                    syncPointsToNode(tm); dispose();
+                    if (onRemoved != null) onRemoved.run();
+                }
+                public void mouseEntered(MouseEvent e){ closeBtn.setForeground(new Color(255,80,80)); }
+                public void mouseExited(MouseEvent e) { closeBtn.setForeground(new Color(180,180,200)); }
+            });
+            panel.add(closeBtn, BorderLayout.EAST);
+
+            panel.addMouseListener(new MouseAdapter(){
+                public void mousePressed(MouseEvent e){ dragOffX=e.getX(); dragOffY=e.getY(); }
+            });
+            panel.addMouseMotionListener(new MouseMotionAdapter(){
+                public void mouseDragged(MouseEvent e){
+                    Point loc=win.getLocationOnScreen();
+                    int nx=loc.x+e.getX()-dragOffX, ny=loc.y+e.getY()-dragOffY;
+                    win.setLocation(nx,ny);
+                    screenX=nx+win.getWidth()/2; screenY=ny+win.getHeight();
+                    if (rowIndex<tm.getRowCount()) {
+                        tm.setValueAt(screenX,rowIndex,1);
+                        tm.setValueAt(screenY,rowIndex,2);
+                        syncPointsToNode(tm);
+                    }
+                }
+            });
+
+            win.setContentPane(panel); win.pack();
+            win.setLocation(screenX-win.getWidth()/2, screenY-win.getHeight());
+        }
+
+        String infoHtml() {
+            return "<html><span style='color:#64b4ff'>"+screenX+", "+screenY+"</span></html>";
+        }
+
+        void show()    { win.setVisible(true); }
+        void dispose() { win.dispose(); }
+    }
+
+    private JButton smartBarBtn(String text, Color bg) {
+        JButton b = new JButton(text);
+        b.setFont(new Font("SansSerif",Font.PLAIN,11));
+        b.setBackground(bg); b.setForeground(Color.WHITE); b.setOpaque(true);
+        b.setFocusPainted(false); b.setBorderPainted(false);
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        return b;
+    }
+
+    // =========================================================
     //  REFLECTION HELPERS
     // =========================================================
+    // ── Reflection helpers — use getDeclaredField+setAccessible for package-private node classes ──
+    private java.lang.reflect.Field getField(nodes.BaseNode node, String name) throws Exception {
+        Class<?> cls = node.getClass();
+        while (cls != null) {
+            try {
+                java.lang.reflect.Field f = cls.getDeclaredField(name);
+                f.setAccessible(true);
+                return f;
+            } catch (NoSuchFieldException e) { cls = cls.getSuperclass(); }
+        }
+        throw new NoSuchFieldException(name);
+    }
+
     private int getIntField(String name, int def) {
-        try { return (int) currentNode.getClass().getField(name).get(currentNode); }
+        try { return (int) getField(currentNode, name).get(currentNode); }
         catch (Exception e) { return def; }
     }
     private void setIntField(String name, int val) {
-        try { currentNode.getClass().getField(name).set(currentNode, val); } catch (Exception ignored) {}
+        try { getField(currentNode, name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private long getLongField(String name, long def) {
-        try { return (long) currentNode.getClass().getField(name).get(currentNode); }
+        try { return (long) getField(currentNode, name).get(currentNode); }
         catch (Exception e) { return def; }
     }
     private void setLongField(String name, long val) {
-        try { currentNode.getClass().getField(name).set(currentNode, val); } catch (Exception ignored) {}
+        try { getField(currentNode, name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private boolean getBoolField(String name, boolean def) {
-        try { return (boolean) currentNode.getClass().getField(name).get(currentNode); }
+        try { return (boolean) getField(currentNode, name).get(currentNode); }
         catch (Exception e) { return def; }
     }
     private void setBoolField(String name, boolean val) {
-        try { currentNode.getClass().getField(name).set(currentNode, val); } catch (Exception ignored) {}
+        try { getField(currentNode, name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private String getStrField(String name, String def) {
-        try { Object v=currentNode.getClass().getField(name).get(currentNode); return v!=null?v.toString():def; }
+        try { Object v=getField(currentNode,name).get(currentNode); return v!=null?v.toString():def; }
         catch (Exception e) { return def; }
     }
     private void setStrField(String name, String val) {
-        try { currentNode.getClass().getField(name).set(currentNode, val); } catch (Exception ignored) {}
+        try { getField(currentNode, name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private Object getObjField(String name) {
-        try { return currentNode.getClass().getField(name).get(currentNode); }
+        try { return getField(currentNode, name).get(currentNode); }
         catch (Exception e) { return null; }
     }
     private void setObjField(String name, Object val) {
-        try { currentNode.getClass().getField(name).set(currentNode, val); } catch (Exception ignored) {}
+        try { getField(currentNode, name).set(currentNode, val); } catch (Exception ignored) {}
     }
 
     @SuppressWarnings("unchecked")
     private java.util.List<int[]> getPointsField() {
         try {
-            Object v = currentNode.getClass().getField("points").get(currentNode);
+            Object v = getField(currentNode, "points").get(currentNode);
             if (v instanceof java.util.List) return (java.util.List<int[]>) v;
         } catch (Exception ignored) {}
         return new java.util.ArrayList<>();
@@ -555,8 +830,25 @@ public class NodeEditor extends JPanel {
                 });
             } catch (Exception ignored) {}
         }
-        try { currentNode.getClass().getField("points").set(currentNode, pts); }
+        try { getField(currentNode, "points").set(currentNode, pts); }
         catch (Exception ignored) {}
+    }
+
+    private void syncPointsToNode(DefaultTableModel tm, nodes.BaseNode node) {
+        java.util.List<int[]> pts = new java.util.ArrayList<>();
+        for (int i=0;i<tm.getRowCount();i++) {
+            try {
+                pts.add(new int[]{
+                    Integer.parseInt(tm.getValueAt(i,1).toString()),
+                    Integer.parseInt(tm.getValueAt(i,2).toString()),
+                    Integer.parseInt(tm.getValueAt(i,3).toString()),
+                    Integer.parseInt(tm.getValueAt(i,4).toString()),
+                    Integer.parseInt(tm.getValueAt(i,5).toString())
+                });
+            } catch (Exception ignored) {}
+        }
+        try { getField(node, "points").set(node, pts); }
+        catch (Exception e) { e.printStackTrace(); }
     }
 
     // =========================================================

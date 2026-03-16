@@ -10,74 +10,137 @@ import java.util.function.BiConsumer;
 public class NodePalette extends JPanel {
 
     private BiConsumer<BaseNode.NodeType, Point> onNodeDropped;
+    private Runnable onSmartPinClicked;
+    private NodeCanvas targetCanvas;
+
+    // Same icons as NodeFactory palette
+    // Only show most-used nodes in palette — rest available via right-click
+    private static final BaseNode.NodeType[] PALETTE_TYPES = {
+        BaseNode.NodeType.WATCH_ZONE,
+        BaseNode.NodeType.SIMPLE_CLICK,
+        BaseNode.NodeType.WAIT,
+        BaseNode.NodeType.STOP
+    };
+    private static final String[] ICONS = { "◎","⊕","⏸","■" };
+    private static final String[] NAMES = { "Watch Zone","Simple Click","Wait","Stop" };
+
+    // Ghost drag state
+    private BaseNode.NodeType draggingType = null;
 
     public NodePalette() {
-        setBackground(new Color(28, 28, 38));
-        setLayout(new FlowLayout(FlowLayout.LEFT, 6, 8));
-        setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(50, 50, 65)));
-        setPreferredSize(new Dimension(0, 62));
+        setBackground(new Color(25,25,35));
+        setLayout(new FlowLayout(FlowLayout.LEFT,4,6));
+        setBorder(BorderFactory.createMatteBorder(0,0,1,0,new Color(50,50,65)));
+        setPreferredSize(new Dimension(0,58));
 
-        JLabel header = new JLabel("NODES:");
-        header.setForeground(new Color(120, 120, 150));
-        header.setFont(new Font("SansSerif", Font.BOLD, 10));
-        header.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 2));
+        JLabel header=new JLabel("NODES:");
+        header.setForeground(new Color(100,100,130));
+        header.setFont(new Font("SansSerif",Font.BOLD,10));
+        header.setBorder(BorderFactory.createEmptyBorder(0,6,0,4));
         add(header);
 
-        for (BaseNode.NodeType type : BaseNode.NodeType.values()) {
-            add(buildCard(type));
-        }
+        for (int i=0;i<PALETTE_TYPES.length;i++) add(buildCard(PALETTE_TYPES[i],ICONS[i],NAMES[i]));
 
-        JLabel hint = new JLabel("  Click to add  |  Right-click canvas for menu");
-        hint.setForeground(new Color(70, 70, 90));
-        hint.setFont(new Font("SansSerif", Font.PLAIN, 9));
+        JLabel hint=new JLabel("Click or drag to canvas  ·  Right-click canvas for menu");
+        hint.setForeground(new Color(60,60,80)); hint.setFont(new Font("SansSerif",Font.PLAIN,9));
+        hint.setBorder(BorderFactory.createEmptyBorder(0,8,0,0));
         add(hint);
     }
 
-    public void setOnNodeDropped(BiConsumer<BaseNode.NodeType, Point> cb) {
-        onNodeDropped = cb;
-    }
+    public void setOnNodeDropped(BiConsumer<BaseNode.NodeType,Point> cb) { onNodeDropped=cb; }
+    public void setOnSmartPinClicked(Runnable cb) { onSmartPinClicked=cb; }
+    public void setTargetCanvas(NodeCanvas canvas) { targetCanvas=canvas; }
 
-    private JPanel buildCard(BaseNode.NodeType type) {
-        Color nodeColor = NodeFactory.color(type);
-        String name     = NodeFactory.displayName(type);
+    private JPanel buildCard(BaseNode.NodeType type, String icon, String name) {
+        Color nc=NodeFactory.color(type);
 
-        JPanel card = new JPanel() {
-            boolean hovered = false;
+        JPanel card=new JPanel() {
+            boolean hovered=false;
+            boolean pressing=false;
             {
-                setPreferredSize(new Dimension(90, 44));
+                setPreferredSize(new Dimension(105,44));
                 setOpaque(false);
                 setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-                setToolTipText("Add " + name);
+                setToolTipText("Add "+name+" — drag to position");
 
-                addMouseListener(new MouseAdapter() {
-                    public void mouseEntered(MouseEvent e) { hovered = true;  repaint(); }
-                    public void mouseExited(MouseEvent e)  { hovered = false; repaint(); }
-                    public void mouseClicked(MouseEvent e) {
-                        if (onNodeDropped != null)
-                            onNodeDropped.accept(type, new Point(0, 0));
+                addMouseListener(new MouseAdapter(){
+                    public void mouseEntered(MouseEvent e){ hovered=true; repaint(); }
+                    public void mouseExited(MouseEvent e) { hovered=false; repaint(); }
+                    public void mousePressed(MouseEvent e){
+                        pressing=true;
+                        draggingType=type;
+                        if (targetCanvas!=null) targetCanvas.startGhostDrag(type);
+                    }
+                    public void mouseReleased(MouseEvent e){
+                        pressing=false;
+                        if (draggingType!=null) {
+                            // Convert release point to screen
+                            Point screenPt=e.getLocationOnScreen();
+                            if (targetCanvas!=null && isOverCanvas(screenPt)) {
+                                BaseNode dropped=targetCanvas.finishGhostDrag(screenPt);
+                                // notify
+                                if (onNodeDropped!=null) onNodeDropped.accept(type,screenPt);
+                            } else {
+                                // Click (not drag) or dropped outside → add at random
+                                if (targetCanvas!=null) targetCanvas.cancelGhostDrag();
+                                if (onNodeDropped!=null) onNodeDropped.accept(type,new Point(0,0));
+                            }
+                            draggingType=null;
+                        }
+                    }
+                });
+                addMouseMotionListener(new MouseMotionAdapter(){
+                    public void mouseDragged(MouseEvent e){
+                        if (targetCanvas!=null&&draggingType!=null)
+                            targetCanvas.updateGhostDrag(e.getLocationOnScreen());
                     }
                 });
             }
 
+            private boolean isOverCanvas(Point screenPt) {
+                if (targetCanvas==null) return false;
+                try {
+                    Point canvasLoc=targetCanvas.getLocationOnScreen();
+                    Rectangle bounds=new Rectangle(canvasLoc.x,canvasLoc.y,targetCanvas.getWidth(),targetCanvas.getHeight());
+                    return bounds.contains(screenPt);
+                } catch(Exception e){ return false; }
+            }
+
             @Override
             protected void paintComponent(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g;
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(hovered ? nodeColor.darker() : new Color(40, 40, 55));
-                g2.fillRoundRect(0, 2, getWidth()-1, getHeight()-4, 10, 10);
-                g2.setColor(nodeColor);
-                g2.fillRoundRect(0, 2, getWidth()-1, 4, 6, 6);
-                g2.setFont(new Font("SansSerif", Font.BOLD, 11));
-                g2.setColor(nodeColor.brighter());
-                String abbr = name.substring(0, Math.min(2, name.length())).toUpperCase();
-                g2.drawString(abbr, 6, 24);
-                g2.setFont(new Font("SansSerif", Font.BOLD, 9));
-                g2.setColor(hovered ? Color.WHITE : new Color(200, 200, 210));
-                String[] words = name.split(" ");
-                g2.drawString(words[0], 6, 34);
-                if (words.length >= 2) g2.drawString(words[1], 6, 44);
+                Graphics2D g2=(Graphics2D)g;
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                Color bg = hovered ? nc.darker().darker() : new Color(35,35,48);
+                g2.setColor(bg); g2.fillRoundRect(0,2,getWidth()-1,getHeight()-4,8,8);
+                g2.setColor(nc); g2.fillRoundRect(0,2,getWidth()-1,3,4,4);
+                g2.setFont(new Font("SansSerif",Font.BOLD,14)); g2.setColor(nc.brighter());
+                g2.drawString(icon,8,22);
+                g2.setFont(new Font("SansSerif",Font.PLAIN,10));
+                g2.setColor(hovered?Color.WHITE:new Color(200,200,215));
+                String d=name;
+                while(d.length()>1&&g2.getFontMetrics().stringWidth(d)>getWidth()-14) d=d.substring(0,d.length()-1);
+                g2.drawString(d,8,36);
             }
         };
         return card;
+    }
+
+    private JButton buildSmartPinBtn() {
+        JButton b=new JButton("⊕  Smart Pin");
+        b.setFont(new Font("SansSerif",Font.BOLD,11));
+        b.setBackground(new Color(28,28,40)); b.setForeground(new Color(80,140,255)); b.setOpaque(true);
+        b.setFocusPainted(false);
+        b.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(80,140,255),1),
+            BorderFactory.createEmptyBorder(4,10,4,10)));
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        b.setPreferredSize(new Dimension(110,30));
+        b.addMouseListener(new MouseAdapter(){
+            public void mouseEntered(MouseEvent e){ b.setBackground(new Color(40,50,70)); }
+            public void mouseExited(MouseEvent e) { b.setBackground(new Color(28,28,40)); }
+        });
+        b.addActionListener(e->{ if(onSmartPinClicked!=null) onSmartPinClicked.run(); });
+        return b;
     }
 }

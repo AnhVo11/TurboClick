@@ -40,11 +40,13 @@ public class TreeTab extends JPanel {
         editor.setPreferredSize(new Dimension(270, 0));
         editor.setVisible(false);
 
+        // Canvas row: canvas + editor side by side
         JPanel canvasRow = new JPanel(new BorderLayout(0,0));
         canvasRow.setBackground(new Color(22,22,28));
         canvasRow.add(canvas, BorderLayout.CENTER);
         canvasRow.add(editor, BorderLayout.EAST);
 
+        // Body: palette on top, canvas below
         JPanel body = new JPanel(new BorderLayout(0,0));
         body.setBackground(new Color(22,22,28));
         body.add(palette,   BorderLayout.NORTH);
@@ -53,12 +55,34 @@ public class TreeTab extends JPanel {
         add(buildToolbar(), BorderLayout.NORTH);
         add(body,           BorderLayout.CENTER);
 
+        // Wire palette to canvas for ghost drag
+        palette.setTargetCanvas(canvas);
+
+        // Palette click (no drag) → add node at random spread position
         palette.setOnNodeDropped((type, dropPoint) -> {
-            int cx = 80 + (int)(Math.random() * 500);
-            int cy = 60 + (int)(Math.random() * 300);
-            BaseNode node = NodeFactory.create(type, cx, cy);
-            canvas.addNode(node);
-            openEditor(node, canvasRow);
+            // Only handle click case (drag is handled by canvas.finishGhostDrag)
+            if (dropPoint.x == 0 && dropPoint.y == 0) {
+                int cx = 80 + (int)(Math.random() * 400);
+                int cy = 60 + (int)(Math.random() * 250);
+                BaseNode node = NodeFactory.create(type, cx, cy);
+                canvas.addNode(node);
+                openEditor(node, canvasRow);
+            } else {
+                // Drag drop — editor opens via canvas callback
+                BaseNode sel = canvas.getSelectedNode();
+                if (sel != null) openEditor(sel, canvasRow);
+            }
+        });
+
+        // Smart Pin button → show smart pin bar (same as SimpleClickPanel)
+        palette.setOnSmartPinClicked(() -> {
+            // Find the SimpleClickPanel in the app and trigger its smart pin mode
+            // For now show a tooltip-style message on canvas
+            JOptionPane.showMessageDialog(this,
+                "Smart Pin mode is available in Build Simple Click.\n" +
+                "Switch to Build Simple Click to use Smart Pin,\n" +
+                "then switch back — your pins are saved.",
+                "Smart Pin", JOptionPane.INFORMATION_MESSAGE);
         });
 
         canvas.setOnNodeSelected(n -> {
@@ -95,8 +119,8 @@ public class TreeTab extends JPanel {
         nameLbl.setForeground(new Color(200,200,220));
         nameLbl.setFont(new Font("SansSerif",Font.BOLD,12));
 
-        JButton runBtn   = toolBtn("Run",     new Color(40,160,80));
-        JButton stopBtn  = toolBtn("Stop",    new Color(180,50,50));
+        JButton runBtn   = toolBtn("  Run",   new Color(40,160,80));
+        JButton stopBtn  = toolBtn("  Stop",  new Color(180,50,50));
         JButton fitBtn   = toolBtn("Fit View",new Color(60,60,80));
         JButton clearBtn = toolBtn("Clear",   new Color(100,50,50));
 
@@ -108,11 +132,20 @@ public class TreeTab extends JPanel {
             if (r == JOptionPane.YES_OPTION) { canvas.getNodes().clear(); canvas.repaint(); }
         });
 
+        JButton zoomInBtn  = toolBtn("+",  new Color(55,55,75));
+        JButton zoomOutBtn = toolBtn("-",  new Color(55,55,75));
+        JButton zoomRstBtn = toolBtn("1:1",new Color(55,55,75));
+        zoomInBtn.addActionListener(e  -> canvas.zoomIn());
+        zoomOutBtn.addActionListener(e -> canvas.zoomOut());
+        zoomRstBtn.addActionListener(e -> canvas.zoomReset());
+
         bar.add(dot); bar.add(nameLbl);
         bar.add(Box.createHorizontalStrut(10));
         bar.add(runBtn); bar.add(stopBtn);
-        bar.add(Box.createHorizontalStrut(6));
+        bar.add(Box.createHorizontalStrut(8));
         bar.add(fitBtn); bar.add(clearBtn);
+        bar.add(Box.createHorizontalStrut(8));
+        bar.add(zoomOutBtn); bar.add(zoomInBtn); bar.add(zoomRstBtn);
 
         setOnRunStateChanged(() -> SwingUtilities.invokeLater(() ->
             dot.setForeground(treeRunning ? new Color(40,220,80) : new Color(60,60,80))));
@@ -123,10 +156,7 @@ public class TreeTab extends JPanel {
     public void startTree() {
         if (treeRunning) return;
         Map<String, BaseNode> nodeMap = canvas.getNodes();
-        if (nodeMap.isEmpty()) {
-            JOptionPane.showMessageDialog(this,"No nodes on canvas.\nClick a node from the palette above to add one.");
-            return;
-        }
+        if (nodeMap.isEmpty()) { JOptionPane.showMessageDialog(this,"No nodes on canvas.\nClick a node from the palette above to add one."); return; }
         String startId = findStartNode(nodeMap);
         if (startId == null) { JOptionPane.showMessageDialog(this,"Could not find a start node."); return; }
         try {
@@ -134,12 +164,9 @@ public class TreeTab extends JPanel {
             engine = new RuleEngine(nodeMap, startId, ctx);
             engine.setOnNodeStart(n  -> SwingUtilities.invokeLater(canvas::repaint));
             engine.setOnNodeFinish(n -> SwingUtilities.invokeLater(canvas::repaint));
-            engine.setOnTreeFinish(() -> {
-                treeRunning = false;
-                if (onRunStateChanged != null) onRunStateChanged.run();
-            });
+            engine.setOnTreeFinish(() -> { treeRunning = false; if(onRunStateChanged!=null) onRunStateChanged.run(); });
             treeRunning = true;
-            if (onRunStateChanged != null) onRunStateChanged.run();
+            if (onRunStateChanged!=null) onRunStateChanged.run();
             Thread t = new Thread(engine); t.setDaemon(true); t.start();
         } catch (Exception ex) { ex.printStackTrace(); }
     }
