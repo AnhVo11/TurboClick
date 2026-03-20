@@ -448,14 +448,26 @@ public class NodeEditor extends JPanel {
         // Will be wired after tm is created
         final DefaultTableModel[] tmRef = {null};
 
-        String[] cols = {"#","X","Y","Clicks","Sub-ms","After-ms"};
+        // Columns: # X Y Clicks Sub-s(ms) After-s(ms) — store ms internally, display as seconds
+        String[] cols = {"#","X","Y","Clicks","Sub-delay","After-delay"};
         DefaultTableModel tm = new DefaultTableModel(cols, 0) {
-            public boolean isCellEditable(int r, int c) { return c > 0; }
+            public boolean isCellEditable(int r, int c) { return c==1||c==2||c==3; } // X,Y,Clicks editable; delays via popup
+            public Object getValueAt(int r, int c) {
+                Object v = super.getValueAt(r,c);
+                // Display columns 4,5 as seconds with 3 decimal places
+                if ((c==4||c==5) && v instanceof Number) {
+                    long ms = ((Number)v).longValue();
+                    return String.format("%.3f s", ms/1000.0);
+                }
+                return v;
+            }
         };
         java.util.List<int[]> pts = getPointsField();
+        // Disable listener while populating to avoid premature sync
+        javax.swing.event.TableModelListener[] listeners = new javax.swing.event.TableModelListener[0];
         for (int i = 0; i < pts.size(); i++) {
             int[] p = pts.get(i);
-            tm.addRow(new Object[]{i+1, p[0], p[1], p[2], p[3], p[4]});
+            tm.addRow(new Object[]{i+1, p[0], p[1], p[2], (long)p[3], (long)p[4]});
         }
 
         JTable tbl = new JTable(tm);
@@ -466,20 +478,84 @@ public class NodeEditor extends JPanel {
         tbl.getTableHeader().setBackground(new Color(35,35,50));
         tbl.getTableHeader().setForeground(new Color(120,120,150));
         tbl.getTableHeader().setFont(new Font("SansSerif",Font.BOLD,9));
-        int[] cw = {18,45,45,40,50,55};
+        int[] cw = {18,44,44,38,65,65};
         for (int i=0;i<cw.length;i++) tbl.getColumnModel().getColumn(i).setPreferredWidth(cw[i]);
+
+        // Simple renderer for delay columns — shows value in blue tint
+        javax.swing.table.TableCellRenderer delayRenderer = new javax.swing.table.DefaultTableCellRenderer() {
+            public java.awt.Component getTableCellRendererComponent(JTable t, Object val,
+                    boolean sel, boolean foc, int row, int col) {
+                JLabel lbl = (JLabel) super.getTableCellRendererComponent(t,val,sel,foc,row,col);
+                lbl.setBackground(sel ? new Color(50,80,140) : new Color(32,32,44));
+                lbl.setForeground(new Color(160,200,255));
+                lbl.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                return lbl;
+            }
+        };
+        tbl.getColumnModel().getColumn(4).setCellRenderer(delayRenderer);
+        tbl.getColumnModel().getColumn(5).setCellRenderer(delayRenderer);
         tm.addTableModelListener(e -> syncPointsToNode(tm));
         tmRef[0] = tm;
 
-        // Wire Smart Pin button — hides window, shows crosshair, click to add points
+        // Single-click on Sub-s or After-s column → open interval picker popup
+        tbl.addMouseListener(new MouseAdapter(){
+            public void mouseClicked(MouseEvent e){
+                if (e.getClickCount()<1) return;
+                int col = tbl.columnAtPoint(e.getPoint());
+                int row = tbl.rowAtPoint(e.getPoint());
+                if (row<0||(col!=4&&col!=5)) return;
+                Object cur = tm.getValueAt(row, col);
+                long currentMs = 100;
+                try {
+                    // stored as Long internally
+                    if (cur instanceof Long) currentMs = (Long)cur;
+                    else if (cur instanceof Number) currentMs = ((Number)cur).longValue();
+                    else { // displayed as "0.100 s" string
+                        String s = cur.toString().replace(" s","").trim();
+                        currentMs = (long)(Double.parseDouble(s)*1000);
+                    }
+                } catch(Exception ignored){}
+                String colName = col==4 ? "Sub-click delay" : "Delay after click";
+                long result = showIntervalPicker(colName, currentMs);
+                if (result >= 0) {
+                    tm.setValueAt(result, row, col);
+                    syncPointsToNode(tm);
+                }
+            }
+        });
+
+        // Sync stores ms as Long — override syncPointsToNode to handle Long
         smartPinBtn.addActionListener(e -> startSmartPinSession(tmRef[0]));
 
         JScrollPane tblScroll = new JScrollPane(tbl);
-        tblScroll.setPreferredSize(new Dimension(240,100));
-        tblScroll.setMaximumSize(new Dimension(260,100));
+        tblScroll.setPreferredSize(new Dimension(240,110));
+        tblScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE,110));
         tblScroll.setBorder(BorderFactory.createLineBorder(new Color(50,50,65)));
         tblScroll.getViewport().setBackground(new Color(32,32,44));
         tblScroll.setAlignmentX(LEFT_ALIGNMENT);
+        tblScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        // Translucent thin scrollbar
+        JScrollBar vsb = tblScroll.getVerticalScrollBar();
+        vsb.setPreferredSize(new Dimension(5,0));
+        vsb.setOpaque(false);
+        vsb.setUI(new javax.swing.plaf.basic.BasicScrollBarUI(){
+            protected void configureScrollBarColors(){ thumbColor=new Color(100,100,160,160); trackColor=new Color(0,0,0,0); }
+            protected JButton createDecreaseButton(int o){ JButton b=new JButton(); b.setPreferredSize(new Dimension(0,0)); b.setBorderPainted(false); return b; }
+            protected JButton createIncreaseButton(int o){ JButton b=new JButton(); b.setPreferredSize(new Dimension(0,0)); b.setBorderPainted(false); return b; }
+        });
+        // Fade scrollbar after idle
+        javax.swing.Timer[] tblFade = {null};
+        vsb.addAdjustmentListener(ae -> {
+            vsb.setPreferredSize(new Dimension(5,0));
+            if (tblFade[0]!=null) tblFade[0].stop();
+            tblFade[0] = new javax.swing.Timer(1500, ev -> {
+                vsb.setPreferredSize(new Dimension(0,0));
+                tblScroll.revalidate();
+            });
+            tblFade[0].setRepeats(false); tblFade[0].start();
+            tblScroll.revalidate();
+        });
+
         content.add(Box.createVerticalStrut(4));
         content.add(tblScroll);
 
@@ -491,7 +567,7 @@ public class NodeEditor extends JPanel {
 
         addBtn.addActionListener(e -> {
             Point mouse = MouseInfo.getPointerInfo().getLocation();
-            tm.addRow(new Object[]{tm.getRowCount()+1, mouse.x, mouse.y, 1, 100, 100});
+            tm.addRow(new Object[]{tm.getRowCount()+1, mouse.x, mouse.y, 1, 100L, 100L});
             syncPointsToNode(tm);
         });
         remBtn.addActionListener(e -> {
@@ -660,18 +736,7 @@ public class NodeEditor extends JPanel {
         Runnable finish = () -> {
             coordTimer.stop();
             // Build points list from table and save directly to captured node
-            java.util.List<int[]> pts = new java.util.ArrayList<>();
-            for (int i=0;i<tm.getRowCount();i++) {
-                try {
-                    pts.add(new int[]{
-                        Integer.parseInt(tm.getValueAt(i,1).toString()),
-                        Integer.parseInt(tm.getValueAt(i,2).toString()),
-                        Integer.parseInt(tm.getValueAt(i,3).toString()),
-                        Integer.parseInt(tm.getValueAt(i,4).toString()),
-                        Integer.parseInt(tm.getValueAt(i,5).toString())
-                    });
-                } catch (Exception ignored) {}
-            }
+            java.util.List<int[]> pts = buildPointsList(tm);
             try { getField(sessionNode, "points").set(sessionNode, pts); }
             catch (Exception e) { e.printStackTrace(); }
             for (EditorPin ep : pins) ep.dispose();
@@ -844,6 +909,102 @@ public class NodeEditor extends JPanel {
     // =========================================================
     //  REFLECTION HELPERS
     // =========================================================
+    // ── Interval picker popup — same spinners as click interval panel ──
+    private long showIntervalPicker(String title, long currentMs) {
+        int ivH=(int)(currentMs/3600000L), ivM=(int)((currentMs%3600000L)/60000L);
+        int ivS=(int)((currentMs%60000L)/1000L), ivT=(int)((currentMs%1000L)/100L);
+        int ivHu=(int)((currentMs%100L)/10L), ivTh=(int)(currentMs%10L);
+
+        JDialog dlg = new JDialog((java.awt.Frame)null, title, true);
+        dlg.setUndecorated(false);
+        dlg.getContentPane().setBackground(new Color(28,28,38));
+        dlg.setLayout(new BorderLayout());
+
+        JPanel top = new JPanel(new BorderLayout());
+        top.setBackground(new Color(22,22,30));
+        top.setBorder(BorderFactory.createEmptyBorder(10,12,8,12));
+        JLabel lbl = new JLabel(title);
+        lbl.setForeground(new Color(80,140,255)); lbl.setFont(new Font("SansSerif",Font.BOLD,12));
+        top.add(lbl, BorderLayout.WEST);
+        dlg.add(top, BorderLayout.NORTH);
+
+        JPanel body = new JPanel(new BorderLayout(0,4));
+        body.setBackground(new Color(28,28,38));
+        body.setBorder(BorderFactory.createEmptyBorder(8,12,8,12));
+
+        String[] units = {"H","Min","Sec","1/10","1/100","1/1000"};
+        JPanel hdr = new JPanel(new GridLayout(1,6,4,0));
+        hdr.setBackground(new Color(28,28,38));
+        for (String u : units) {
+            JLabel ul = new JLabel(u, SwingConstants.CENTER);
+            ul.setFont(new Font("SansSerif",Font.PLAIN,9));
+            ul.setForeground(new Color(120,120,150));
+            hdr.add(ul);
+        }
+
+        JPanel spRow = new JPanel(new GridLayout(1,6,4,0));
+        spRow.setBackground(new Color(28,28,38));
+        JSpinner[] sps = {
+            mkSp(ivH,0,23), mkSp(ivM,0,59), mkSp(ivS,0,59),
+            mkSp(ivT,0,9),  mkSp(ivHu,0,9), mkSp(ivTh,0,9)
+        };
+        for (JSpinner sp : sps) spRow.add(sp);
+
+        // Live preview
+        JLabel preview = new JLabel("", SwingConstants.CENTER);
+        preview.setForeground(new Color(80,200,120));
+        preview.setFont(new Font("Monospaced",Font.BOLD,11));
+        Runnable updatePreview = () -> {
+            long h=((Number)sps[0].getValue()).longValue(), m=((Number)sps[1].getValue()).longValue();
+            long s=((Number)sps[2].getValue()).longValue(), t=((Number)sps[3].getValue()).longValue();
+            long hu=((Number)sps[4].getValue()).longValue(), th=((Number)sps[5].getValue()).longValue();
+            long ms = Math.max(0, h*3600000L+m*60000L+s*1000L+t*100L+hu*10L+th);
+            preview.setText(String.format("= %.3f seconds", ms/1000.0));
+        };
+        for (JSpinner sp : sps) sp.addChangeListener(e -> updatePreview.run());
+        updatePreview.run();
+
+        body.add(hdr, BorderLayout.NORTH);
+        body.add(spRow, BorderLayout.CENTER);
+        body.add(preview, BorderLayout.SOUTH);
+        dlg.add(body, BorderLayout.CENTER);
+
+        long[] result = {-1};
+        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.RIGHT,8,8));
+        btnRow.setBackground(new Color(22,22,30));
+        JButton ok = editorBtn("OK", new Color(50,100,160));
+        JButton cancel = editorBtn("Cancel", new Color(55,55,75));
+        ok.addActionListener(e -> {
+            long h=((Number)sps[0].getValue()).longValue(), m=((Number)sps[1].getValue()).longValue();
+            long s=((Number)sps[2].getValue()).longValue(), t=((Number)sps[3].getValue()).longValue();
+            long hu=((Number)sps[4].getValue()).longValue(), th=((Number)sps[5].getValue()).longValue();
+            result[0] = Math.max(0, h*3600000L+m*60000L+s*1000L+t*100L+hu*10L+th);
+            dlg.dispose();
+        });
+        cancel.addActionListener(e -> dlg.dispose());
+        btnRow.add(cancel); btnRow.add(ok);
+        dlg.add(btnRow, BorderLayout.SOUTH);
+
+        dlg.pack();
+        dlg.setLocationRelativeTo(null);
+        dlg.setVisible(true);
+        return result[0];
+    }
+
+    private JSpinner mkSp(int val, int min, int max) {
+        JSpinner sp = new JSpinner(new SpinnerNumberModel(val,min,max,1));
+        sp.setPreferredSize(new Dimension(52,28));
+        sp.setFont(new Font("SansSerif",Font.PLAIN,12));
+        sp.setBackground(new Color(35,35,50));
+        JSpinner.DefaultEditor ed = (JSpinner.DefaultEditor)sp.getEditor();
+        ed.getTextField().setBackground(new Color(35,35,50));
+        ed.getTextField().setForeground(new Color(220,220,230));
+        ed.getTextField().setCaretColor(new Color(220,220,230));
+        ed.getTextField().setHorizontalAlignment(JTextField.CENTER);
+        ed.getTextField().setBorder(BorderFactory.createLineBorder(new Color(60,60,85)));
+        return sp;
+    }
+
     // ── Reflection helpers — use getDeclaredField+setAccessible for package-private node classes ──
     private java.lang.reflect.Field getField(nodes.BaseNode node, String name) throws Exception {
         Class<?> cls = node.getClass();
@@ -902,38 +1063,55 @@ public class NodeEditor extends JPanel {
         return new java.util.ArrayList<>();
     }
 
-    private void syncPointsToNode(DefaultTableModel tm) {
-        java.util.List<int[]> pts = new java.util.ArrayList<>();
-        for (int i=0;i<tm.getRowCount();i++) {
-            try {
-                pts.add(new int[]{
-                    Integer.parseInt(tm.getValueAt(i,1).toString()),
-                    Integer.parseInt(tm.getValueAt(i,2).toString()),
-                    Integer.parseInt(tm.getValueAt(i,3).toString()),
-                    Integer.parseInt(tm.getValueAt(i,4).toString()),
-                    Integer.parseInt(tm.getValueAt(i,5).toString())
-                });
-            } catch (Exception ignored) {}
+    /** Parse a table cell value to int — handles Long, Integer, "0.100 s" formatted strings */
+    private static int cellToInt(Object val) {
+        if (val == null) return 0;
+        if (val instanceof Integer) return (Integer)val;
+        if (val instanceof Long)    return (int)(long)(Long)val;
+        if (val instanceof Number)  return ((Number)val).intValue();
+        String s = val.toString().trim();
+        // Handle "0.100 s" → parse as seconds, convert to ms
+        if (s.endsWith(" s") || s.endsWith("s")) {
+            try { return (int)(Double.parseDouble(s.replace(" s","").replace("s","").trim()) * 1000); }
+            catch (Exception ignored) {}
         }
-        try { getField(currentNode, "points").set(currentNode, pts); }
+        // Try plain integer
+        try { return Integer.parseInt(s); }
         catch (Exception ignored) {}
+        // Try double
+        try { return (int)Double.parseDouble(s); }
+        catch (Exception ignored) {}
+        return 0;
+    }
+
+    private void syncPointsToNode(DefaultTableModel tm) {
+        if (currentNode == null) return;
+        java.util.List<int[]> pts = buildPointsList(tm);
+        try { getField(currentNode, "points").set(currentNode, pts); }
+        catch (Exception e) { e.printStackTrace(); }
     }
 
     private void syncPointsToNode(DefaultTableModel tm, nodes.BaseNode node) {
+        if (node == null) return;
+        java.util.List<int[]> pts = buildPointsList(tm);
+        try { getField(node, "points").set(node, pts); }
+        catch (Exception e) { e.printStackTrace(); }
+    }
+
+    private java.util.List<int[]> buildPointsList(DefaultTableModel tm) {
         java.util.List<int[]> pts = new java.util.ArrayList<>();
         for (int i=0;i<tm.getRowCount();i++) {
             try {
                 pts.add(new int[]{
-                    Integer.parseInt(tm.getValueAt(i,1).toString()),
-                    Integer.parseInt(tm.getValueAt(i,2).toString()),
-                    Integer.parseInt(tm.getValueAt(i,3).toString()),
-                    Integer.parseInt(tm.getValueAt(i,4).toString()),
-                    Integer.parseInt(tm.getValueAt(i,5).toString())
+                    cellToInt(tm.getValueAt(i,1)),
+                    cellToInt(tm.getValueAt(i,2)),
+                    cellToInt(tm.getValueAt(i,3)),
+                    cellToInt(tm.getValueAt(i,4)),
+                    cellToInt(tm.getValueAt(i,5))
                 });
-            } catch (Exception ignored) {}
+            } catch (Exception e) { e.printStackTrace(); }
         }
-        try { getField(node, "points").set(node, pts); }
-        catch (Exception e) { e.printStackTrace(); }
+        return pts;
     }
 
     // =========================================================
