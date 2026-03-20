@@ -164,9 +164,21 @@ public class TreeTab extends JPanel {
             engine = new RuleEngine(nodeMap, startId, ctx);
             engine.setOnNodeStart(n  -> SwingUtilities.invokeLater(canvas::repaint));
             engine.setOnNodeFinish(n -> SwingUtilities.invokeLater(canvas::repaint));
-            engine.setOnTreeFinish(() -> { treeRunning = false; if(onRunStateChanged!=null) onRunStateChanged.run(); });
+            engine.setOnTreeFinish(() -> {
+                treeRunning = false;
+                SwingUtilities.invokeLater(() -> {
+                    hideRunHud();
+                    Window w = SwingUtilities.getWindowAncestor(this);
+                    if (w!=null) { w.setVisible(true); w.toFront(); }
+                    if(onRunStateChanged!=null) onRunStateChanged.run();
+                });
+            });
             treeRunning = true;
             if (onRunStateChanged!=null) onRunStateChanged.run();
+            // Hide main window and show run HUD
+            Window w = SwingUtilities.getWindowAncestor(this);
+            if (w!=null) w.setVisible(false);
+            showRunHud();
             Thread t = new Thread(engine); t.setDaemon(true); t.start();
         } catch (Exception ex) { ex.printStackTrace(); }
     }
@@ -174,7 +186,71 @@ public class TreeTab extends JPanel {
     public void stopTree() {
         if (engine != null) engine.stop();
         treeRunning = false;
-        if (onRunStateChanged != null) onRunStateChanged.run();
+        SwingUtilities.invokeLater(() -> {
+            hideRunHud();
+            Window w = SwingUtilities.getWindowAncestor(this);
+            if (w!=null) { w.setVisible(true); w.toFront(); }
+            if (onRunStateChanged != null) onRunStateChanged.run();
+        });
+    }
+
+    // ── Run HUD — small floating bar shown while tree is running ──
+    private JWindow runHud;
+
+    private void showRunHud() {
+        runHud = new JWindow();
+        runHud.setAlwaysOnTop(true);
+        runHud.setFocusableWindowState(false);
+        runHud.setBackground(new Color(0,0,0,0));
+
+        JPanel bar = new JPanel() {
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2=(Graphics2D)g;
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(15,15,22,235));
+                g2.fillRoundRect(0,0,getWidth(),getHeight(),16,16);
+                g2.setColor(new Color(40,200,80,200));
+                g2.fillRoundRect(0,0,getWidth(),3,4,4);
+            }
+        };
+        bar.setOpaque(false);
+        bar.setLayout(new FlowLayout(FlowLayout.CENTER,12,7));
+
+        JLabel running = new JLabel("● Running: "+treeName);
+        running.setFont(new Font("SansSerif",Font.BOLD,12));
+        running.setForeground(new Color(40,220,80));
+
+        JLabel hint = new JLabel("  Press hotkey to stop");
+        hint.setFont(new Font("SansSerif",Font.PLAIN,11));
+        hint.setForeground(new Color(140,140,160));
+
+        JButton stopBtn = new JButton("■ Stop");
+        stopBtn.setBackground(new Color(180,50,50));
+        stopBtn.setForeground(Color.WHITE); stopBtn.setOpaque(true);
+        stopBtn.setBorderPainted(false); stopBtn.setFocusPainted(false);
+        stopBtn.setFont(new Font("SansSerif",Font.BOLD,11));
+        stopBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        stopBtn.addActionListener(e -> stopTree());
+
+        bar.add(running); bar.add(hint); bar.add(stopBtn);
+
+        // Pulse the dot
+        javax.swing.Timer pulse = new javax.swing.Timer(600, e -> {
+            if (!treeRunning) { ((javax.swing.Timer)e.getSource()).stop(); return; }
+            boolean on = running.getForeground().equals(new Color(40,220,80));
+            running.setForeground(on ? new Color(20,140,50) : new Color(40,220,80));
+        });
+        pulse.start();
+
+        runHud.setContentPane(bar);
+        runHud.pack();
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        runHud.setLocation(screen.width/2 - runHud.getWidth()/2, 18);
+        runHud.setVisible(true);
+    }
+
+    private void hideRunHud() {
+        if (runHud!=null) { runHud.dispose(); runHud=null; }
     }
 
     public boolean isRunning() { return treeRunning; }

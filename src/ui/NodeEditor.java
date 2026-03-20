@@ -27,6 +27,7 @@ public class NodeEditor extends JPanel {
     private JLabel    templatePreview;
     private JLabel    zoneStatusLabel;
     private JCheckBox sameAsCaptureCb;
+    private Color     pinRingColor = new Color(255, 210, 0); // default yellow
 
     public NodeEditor() {
         setBackground(BG);
@@ -49,6 +50,37 @@ public class NodeEditor extends JPanel {
         scroll.setBackground(BG);
         scroll.setBorder(null);
         scroll.getViewport().setBackground(BG);
+        // Make scrollbar translucent and auto-hide
+        JScrollBar vsb = scroll.getVerticalScrollBar();
+        vsb.setOpaque(false);
+        vsb.setPreferredSize(new Dimension(6, 0));
+        vsb.setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
+            protected void configureScrollBarColors() {
+                thumbColor = new Color(80,80,110,140);
+                trackColor = new Color(0,0,0,0);
+            }
+            protected JButton createDecreaseButton(int o){ return zeroBtn(); }
+            protected JButton createIncreaseButton(int o){ return zeroBtn(); }
+            private JButton zeroBtn(){
+                JButton b=new JButton(); b.setPreferredSize(new Dimension(0,0));
+                b.setBorderPainted(false); return b;
+            }
+        });
+        scroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        // Fade scrollbar after 1.5s of no scroll
+        javax.swing.Timer[] fadeTimer = {null};
+        vsb.addAdjustmentListener(ae -> {
+            vsb.setPreferredSize(new Dimension(6,0));
+            if (fadeTimer[0]!=null) fadeTimer[0].stop();
+            fadeTimer[0] = new javax.swing.Timer(1500, e2 -> {
+                vsb.setPreferredSize(new Dimension(0,0));
+                scroll.revalidate();
+            });
+            fadeTimer[0].setRepeats(false);
+            fadeTimer[0].start();
+            scroll.revalidate();
+        });
         add(scroll, BorderLayout.CENTER);
 
         showEmpty();
@@ -385,6 +417,27 @@ public class NodeEditor extends JPanel {
         addSection("Click Points");
         addInfo("Empty = click at cursor position");
 
+        // Pin ring color picker
+        JPanel ringRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        ringRow.setBackground(BG); ringRow.setAlignmentX(LEFT_ALIGNMENT);
+        JLabel ringLbl = new JLabel("Pin ring color:");
+        ringLbl.setForeground(TEXT_DIM); ringLbl.setFont(new Font("SansSerif",Font.PLAIN,10));
+        JButton ringBtn = new JButton();
+        ringBtn.setBackground(pinRingColor);
+        ringBtn.setPreferredSize(new Dimension(28,18));
+        ringBtn.setBorder(BorderFactory.createLineBorder(new Color(80,80,100),1));
+        ringBtn.setOpaque(true); ringBtn.setFocusPainted(false);
+        ringBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        ringBtn.addActionListener(e -> {
+            Color chosen = JColorChooser.showDialog(this, "Pin Ring Color", pinRingColor);
+            if (chosen != null) {
+                pinRingColor = chosen;
+                ringBtn.setBackground(chosen);
+            }
+        });
+        ringRow.add(ringLbl); ringRow.add(ringBtn);
+        content.add(ringRow);
+
         // Smart Pin button — pick points by clicking on screen
         JButton smartPinBtn = editorBtn("⊕  Smart Pin — pick points on screen", new Color(50,100,180));
         smartPinBtn.setAlignmentX(LEFT_ALIGNMENT);
@@ -634,30 +687,42 @@ public class NodeEditor extends JPanel {
         doneBtn.addActionListener(ae -> finish.run());
 
         addPinBtn.addActionListener(ae -> {
-            int px=lastMouse[0], py=lastMouse[1];
-            int row=tm.getRowCount();
+            // Spawn at center of screen so user can always see and drag it
+            Dimension scr = Toolkit.getDefaultToolkit().getScreenSize();
+            int px = scr.width/2;
+            int py = scr.height/2;
+            int row = tm.getRowCount();
             tm.addRow(new Object[]{row+1, px, py, 1, 100, 100});
             syncPointsToNode(tm);
             EditorPin ep = new EditorPin(px, py, row, tm);
             pins.add(ep);
             ep.onRemoved = () -> {
                 pins.remove(ep);
-                // Fix rowIndex for remaining pins
                 for (int ri=0;ri<pins.size();ri++) pins.get(ri).rowIndex=ri;
                 pinCountLbl.setText("Pins: "+pins.size());
             };
-            ep.show();
+            SwingUtilities.invokeLater(() -> {
+                ep.show();
+                ep.win.toFront();
+            });
             pinCountLbl.setText("Pins: "+pins.size());
         });
     }
 
-    // ── Floating pin widget (mirrors SmartPin in SimpleClickPanel) ──
+    private void placeEditorPinWindow(JWindow win, int sx, int sy) {
+        // Center the crosshair on the exact screen point
+        win.setLocation(sx - win.getWidth()/2, sy - win.getHeight()/2);
+    }
+
+
+
+    // ── Floating pin — crosshair + colored ring + drag ─────────────
     private class EditorPin {
         JWindow win;
         int screenX, screenY, rowIndex;
         DefaultTableModel tm;
-        int dragOffX, dragOffY;
         Runnable onRemoved;
+        static final int PSZ = 44; // window size, center = exact screen point
 
         EditorPin(int x, int y, int row, DefaultTableModel tm) {
             screenX=x; screenY=y; rowIndex=row; this.tm=tm; build();
@@ -666,81 +731,101 @@ public class NodeEditor extends JPanel {
         void build() {
             win = new JWindow();
             win.setAlwaysOnTop(true);
-            win.setBackground(new Color(0,0,0,0));
+            // Use near-transparent bg so window is visible but mouse events work
+            win.setBackground(new Color(0,0,0,1));
 
-            JPanel panel = new JPanel() {
+            // Use a solid-bg panel so mouse events are captured reliably on macOS
+            JPanel panel = new JPanel(null) {
+                boolean hovered = false;
+                {
+                    // NOT opaque=false — tiny 1-alpha bg catches events on macOS
+                    setBackground(new Color(0,0,0,1));
+                    setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+                    addMouseListener(new MouseAdapter(){
+                        public void mouseEntered(MouseEvent e){ hovered=true; repaint(); }
+                        public void mouseExited(MouseEvent e) { hovered=false; repaint(); }
+                        public void mouseClicked(MouseEvent e){
+                            if (e.getButton()==MouseEvent.BUTTON3) {
+                                if (rowIndex<tm.getRowCount()) tm.removeRow(rowIndex);
+                                for (int i=0;i<tm.getRowCount();i++) tm.setValueAt(i+1,i,0);
+                                syncPointsToNode(tm); dispose();
+                                if (onRemoved!=null) onRemoved.run();
+                            }
+                        }
+                    });
+
+                    // Drag: move the JWindow directly, keep it visible
+                    int[] off = {0,0};
+                    addMouseListener(new MouseAdapter(){
+                        public void mousePressed(MouseEvent e){ off[0]=e.getX(); off[1]=e.getY(); }
+                        public void mouseReleased(MouseEvent e){
+                            // Sync final position to table
+                            if (rowIndex<tm.getRowCount()) {
+                                tm.setValueAt(screenX,rowIndex,1);
+                                tm.setValueAt(screenY,rowIndex,2);
+                                syncPointsToNode(tm);
+                            }
+                        }
+                    });
+                    addMouseMotionListener(new MouseMotionAdapter(){
+                        public void mouseDragged(MouseEvent e){
+                            Point loc = win.getLocationOnScreen();
+                            int nx = loc.x + e.getX() - off[0];
+                            int ny = loc.y + e.getY() - off[1];
+                            win.setLocation(nx, ny);
+                            // Update screen coords (center of window)
+                            screenX = nx + PSZ/2;
+                            screenY = ny + PSZ/2;
+                            repaint();
+                        }
+                    });
+                }
+
                 protected void paintComponent(Graphics g) {
                     Graphics2D g2=(Graphics2D)g;
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
-                    g2.setColor(new Color(0,0,0,50));
-                    g2.fillRoundRect(3,3,getWidth()-3,getHeight()-16,12,12);
-                    g2.setColor(new Color(20,20,32,230));
-                    g2.fillRoundRect(0,0,getWidth()-3,getHeight()-13,12,12);
-                    int cx=(getWidth()-3)/2;
-                    g2.fillPolygon(new int[]{cx-7,cx+7,cx},
-                                   new int[]{getHeight()-13,getHeight()-13,getHeight()-1},3);
-                    // Red dot at tip = exact click location (4px)
-                    g2.setColor(new Color(255,60,60));
-                    g2.fillRect(cx-2, getHeight()-4, 4, 4);
-                    g2.setColor(new Color(80,140,255));
-                    g2.fillOval(4,4,20,20);
-                    g2.setColor(Color.WHITE);
-                    g2.setFont(new Font("SansSerif",Font.BOLD,11));
-                    String num=String.valueOf(rowIndex+1);
-                    FontMetrics fm=g2.getFontMetrics();
-                    g2.drawString(num,14-fm.stringWidth(num)/2,18);
-                }
-            };
-            panel.setOpaque(false);
-            panel.setLayout(new BorderLayout());
-            panel.setPreferredSize(new Dimension(140,54));
+                    int cx=getWidth()/2, cy=getHeight()/2;
 
-            JLabel info = new JLabel(infoHtml());
-            info.setFont(new Font("SansSerif",Font.PLAIN,10));
-            info.setBorder(new EmptyBorder(4,28,14,4));
-            panel.add(info, BorderLayout.CENTER);
+                    // Ring — smaller size
+                    int ringR = 10;
+                    g2.setColor(pinRingColor);
+                    g2.setStroke(new BasicStroke(2f));
+                    g2.drawOval(cx-ringR, cy-ringR, ringR*2, ringR*2);
 
-            JLabel closeBtn = new JLabel("×");
-            closeBtn.setFont(new Font("SansSerif",Font.BOLD,13));
-            closeBtn.setForeground(new Color(180,180,200));
-            closeBtn.setBorder(new EmptyBorder(2,0,14,6));
-            closeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            closeBtn.addMouseListener(new MouseAdapter(){
-                public void mouseClicked(MouseEvent e){
-                    if (rowIndex < tm.getRowCount()) tm.removeRow(rowIndex);
-                    // refresh row numbers
-                    for (int i=0;i<tm.getRowCount();i++) tm.setValueAt(i+1,i,0);
-                    syncPointsToNode(tm); dispose();
-                    if (onRemoved != null) onRemoved.run();
-                }
-                public void mouseEntered(MouseEvent e){ closeBtn.setForeground(new Color(255,80,80)); }
-                public void mouseExited(MouseEvent e) { closeBtn.setForeground(new Color(180,180,200)); }
-            });
-            panel.add(closeBtn, BorderLayout.EAST);
+                    // Crosshair — gap at center
+                    g2.setColor(new Color(255,255,255,230));
+                    g2.setStroke(new BasicStroke(1.5f));
+                    int arm=8, gap=4;
+                    g2.drawLine(cx-arm,cy, cx-gap,cy);
+                    g2.drawLine(cx+gap,cy, cx+arm,cy);
+                    g2.drawLine(cx,cy-arm, cx,cy-gap);
+                    g2.drawLine(cx,cy+gap, cx,cy+arm);
 
-            panel.addMouseListener(new MouseAdapter(){
-                public void mousePressed(MouseEvent e){ dragOffX=e.getX(); dragOffY=e.getY(); }
-            });
-            panel.addMouseMotionListener(new MouseMotionAdapter(){
-                public void mouseDragged(MouseEvent e){
-                    Point loc=win.getLocationOnScreen();
-                    int nx=loc.x+e.getX()-dragOffX, ny=loc.y+e.getY()-dragOffY;
-                    win.setLocation(nx,ny);
-                    screenX=nx+win.getWidth()/2; screenY=ny+win.getHeight();
-                    if (rowIndex<tm.getRowCount()) {
-                        tm.setValueAt(screenX,rowIndex,1);
-                        tm.setValueAt(screenY,rowIndex,2);
-                        syncPointsToNode(tm);
+                    // Red center dot
+                    g2.setColor(new Color(255,50,50));
+                    g2.fillOval(cx-3,cy-3,6,6);
+
+                    // Number overlaid ON the crosshair — only when NOT hovered (idle state)
+                    // Hidden while hovered so user can see exact position clearly
+                    if (!hovered) {
+                        String lbl=String.valueOf(rowIndex+1);
+                        g2.setFont(new Font("SansSerif",Font.BOLD,9));
+                        FontMetrics fm=g2.getFontMetrics();
+                        int lw=fm.stringWidth(lbl);
+                        // Draw number centered over the cross
+                        g2.setColor(new Color(0,0,0,160));
+                        g2.fillOval(cx-6,cy-6,12,12);
+                        g2.setColor(Color.WHITE);
+                        g2.drawString(lbl, cx-lw/2, cy+4);
                     }
                 }
-            });
+            };
 
-            win.setContentPane(panel); win.pack();
-            win.setLocation(screenX-win.getWidth()/2, screenY-win.getHeight());
-        }
-
-        String infoHtml() {
-            return "<html><span style='color:#64b4ff'>"+screenX+", "+screenY+"</span></html>";
+            panel.setPreferredSize(new Dimension(PSZ,PSZ));
+            win.setContentPane(panel);
+            win.setSize(PSZ,PSZ);
+            placeEditorPinWindow(win, screenX, screenY);
         }
 
         void show()    { win.setVisible(true); }
