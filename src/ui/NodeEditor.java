@@ -429,11 +429,34 @@ public class NodeEditor extends JPanel {
         ringBtn.setOpaque(true); ringBtn.setFocusPainted(false);
         ringBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         ringBtn.addActionListener(e -> {
-            Color chosen = JColorChooser.showDialog(this, "Pin Ring Color", pinRingColor);
-            if (chosen != null) {
-                pinRingColor = chosen;
-                ringBtn.setBackground(chosen);
+            Color[] presets = {
+                new Color(255,210,0),   // Yellow
+                new Color(255,80,80),   // Red
+                new Color(80,200,80),   // Green
+                new Color(80,140,255),  // Blue
+                new Color(255,140,0),   // Orange
+                new Color(200,80,255),  // Purple
+                new Color(0,220,220),   // Cyan
+                Color.WHITE,
+                new Color(180,180,180)  // Gray
+            };
+            JDialog picker = new JDialog((java.awt.Frame)null, "Pin Ring Color", true);
+            picker.setUndecorated(true);
+            picker.getContentPane().setBackground(new Color(28,28,38));
+            JPanel grid = new JPanel(new GridLayout(1,9,4,0));
+            grid.setBackground(new Color(28,28,38)); grid.setBorder(BorderFactory.createEmptyBorder(8,8,8,8));
+            for (Color col : presets) {
+                JButton swatch = new JButton();
+                swatch.setPreferredSize(new Dimension(22,22));
+                swatch.setBackground(col); swatch.setOpaque(true);
+                swatch.setBorderPainted(false); swatch.setFocusPainted(false);
+                swatch.setBorder(BorderFactory.createLineBorder(new Color(80,80,100),1));
+                swatch.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                swatch.addActionListener(ae -> { pinRingColor=col; ringBtn.setBackground(col); picker.dispose(); });
+                grid.add(swatch);
             }
+            picker.add(grid); picker.pack();
+            picker.setLocationRelativeTo(ringBtn); picker.setVisible(true);
         });
         ringRow.add(ringLbl); ringRow.add(ringBtn);
         content.add(ringRow);
