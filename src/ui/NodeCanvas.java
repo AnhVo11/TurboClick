@@ -25,6 +25,11 @@ public class NodeCanvas extends JPanel {
     private String   connectPort   = null;
     private Point    connectMouse  = null;
     private BaseNode selectedNode  = null;
+    private Arrow      selectedArrow      = null;
+    private Arrow      bendDragArrow      = null;
+    private int        bendDragStartY     = 0;
+    private int        bendDragOrigOffset = 0;
+    private String     startNodeId        = null;
 
     // ── Ghost drag (from palette) ─────────────────────────────
     private BaseNode.NodeType ghostType   = null;  // type being dragged in
@@ -76,6 +81,8 @@ public class NodeCanvas extends JPanel {
     // ── Arrow class ───────────────────────────────────────────
     public static class Arrow {
         public String fromNodeId, fromPort, toNodeId, label;
+        public int    bendOffset = 40; // pixels down from src before turning
+        public boolean selected  = false;
         Arrow(String from, String port, String to, String label) {
             fromNodeId=from; fromPort=port; toNodeId=to; this.label=label;
         }
@@ -94,12 +101,29 @@ public class NodeCanvas extends JPanel {
         };
         addMouseListener(ma);
         addMouseMotionListener(ma);
-        // Mouse wheel zoom disabled — use toolbar +/- buttons instead
-        // addMouseWheelListener removed intentionally
+        setFocusable(true);
+        addKeyListener(new KeyAdapter(){
+            public void keyPressed(KeyEvent e){
+                if ((e.getKeyCode()==KeyEvent.VK_DELETE||e.getKeyCode()==KeyEvent.VK_BACK_SPACE)
+                        && selectedArrow!=null) {
+                    // Remove the arrow and clear its port target
+                    BaseNode from = nodes.get(selectedArrow.fromNodeId);
+                    if (from!=null) from.setPortTarget(selectedArrow.fromPort, null);
+                    arrows.remove(selectedArrow);
+                    selectedArrow=null;
+                    repaint(); notifyChanged();
+                }
+            }
+        });
+        addMouseListener(new MouseAdapter(){
+            public void mousePressed(MouseEvent e){ requestFocusInWindow(); }
+        });
     }
 
     // ── Public API ────────────────────────────────────────────
     public void setOnNodeSelected(Consumer<BaseNode> cb)    { onNodeSelected    = cb; }
+    public void setStartNode(String id) { startNodeId = id; repaint(); }
+    public String getStartNodeId()      { return startNodeId; }
     public void setOnNodeDoubleClick(Consumer<BaseNode> cb) { onNodeDoubleClick = cb; }
     public void setOnCanvasChanged(Runnable cb)             { onCanvasChanged   = cb; }
 
@@ -333,6 +357,13 @@ public class NodeCanvas extends JPanel {
         g2.setFont(new Font("SansSerif",Font.PLAIN,9)); g2.setColor(new Color(255,255,255,140));
         g2.drawString(node.type.name().replace("_"," "), x+34, y+32);
 
+        // Start node badge — green ▶ in top-right corner
+        if (node.id.equals(startNodeId)) {
+            g2.setColor(new Color(40,220,80));
+            g2.setFont(new Font("SansSerif",Font.BOLD,11));
+            g2.drawString("▶", x+w-18, y+14);
+        }
+
         // ── Output ports with icon + colored dot ─────────────
         int numPorts = node.outputs.size();
         if (numPorts>0) {
@@ -368,37 +399,62 @@ public class NodeCanvas extends JPanel {
     }
 
     private void drawArrows(Graphics2D g2) {
-        for (Arrow a:arrows) {
+        for (Arrow a : arrows) {
             BaseNode from=nodes.get(a.fromNodeId), to=nodes.get(a.toNodeId);
-            if(from==null||to==null) continue;
+            if (from==null||to==null) continue;
             Point src=from.outputAnchor(a.fromPort), dst=to.inputAnchor();
-            Color ac = portColor(a.fromPort);
-            drawCurvedArrow(g2,src,dst,ac,a.label);
+            Color ac = a.selected ? new Color(255,220,60) : portColor(a.fromPort);
+            drawOrthogonalArrow(g2, a, src, dst, ac);
         }
     }
 
     private void drawLiveArrow(Graphics2D g2) {
         Point src=connectFrom.outputAnchor(connectPort);
         int mx=(int)((connectMouse.x-panX)/zoom), my=(int)((connectMouse.y-panY)/zoom);
-        drawCurvedArrow(g2,src,new Point(mx,my),ARROW_HOVER,null);
+        // Simple straight live preview
+        g2.setColor(ARROW_HOVER);
+        g2.setStroke(new BasicStroke(1.5f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));
+        g2.drawLine(src.x, src.y, mx, my);
+        drawArrowHead(g2, new Point(mx,my), ARROW_HOVER);
     }
 
-    private void drawCurvedArrow(Graphics2D g2, Point src, Point dst, Color color, String label) {
+    /** Draw orthogonal (right-angle) routed arrow with draggable bend */
+    private void drawOrthogonalArrow(Graphics2D g2, Arrow a, Point src, Point dst, Color color) {
+        int bendY = src.y + a.bendOffset; // horizontal segment Y
+
+        // 3-segment path: down → across → down to target
+        int[] xs = { src.x, src.x, dst.x, dst.x };
+        int[] ys = { src.y, bendY,  bendY,  dst.y };
+
         g2.setColor(color);
-        g2.setStroke(new BasicStroke(2f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));
-        int dy=Math.max(60,Math.abs(dst.y-src.y)/2);
-        CubicCurve2D curve=new CubicCurve2D.Float(src.x,src.y,src.x,src.y+dy,dst.x,dst.y-dy,dst.x,dst.y);
-        g2.draw(curve);
-        drawArrowHead(g2,dst,color);
-        if (label!=null&&!label.isEmpty()) {
-            float mx=(float)(0.125*src.x+0.375*src.x+0.375*dst.x+0.125*dst.x);
-            float my=(float)(0.125*src.y+0.375*(src.y+dy)+0.375*(dst.y-dy)+0.125*dst.y);
+        boolean sel = a.selected;
+        g2.setStroke(new BasicStroke(sel?2.5f:2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+
+        // Draw 3 segments
+        for (int i=0; i<3; i++) g2.drawLine(xs[i],ys[i],xs[i+1],ys[i+1]);
+
+        // Arrowhead at dst
+        drawArrowHead(g2, dst, color);
+
+        // Bend handle — small circle on the horizontal segment, shown when selected
+        if (sel) {
+            int hx = (src.x + dst.x)/2;
+            g2.setColor(new Color(255,220,60));
+            g2.fillOval(hx-5, bendY-5, 10, 10);
+            g2.setColor(Color.WHITE);
+            g2.setStroke(new BasicStroke(1f));
+            g2.drawOval(hx-5, bendY-5, 10, 10);
+        }
+
+        // Label on horizontal segment
+        if (a.label!=null&&!a.label.isEmpty()) {
+            int lx=(src.x+dst.x)/2, ly=bendY-8;
             g2.setFont(new Font("SansSerif",Font.BOLD,10));
-            FontMetrics fm=g2.getFontMetrics(); int lw=fm.stringWidth(label);
+            FontMetrics fm=g2.getFontMetrics(); int lw=fm.stringWidth(a.label);
             g2.setColor(new Color(30,30,40,200));
-            g2.fillRoundRect((int)mx-lw/2-3,(int)my-12,lw+6,16,6,6);
+            g2.fillRoundRect(lx-lw/2-3,ly-12,lw+6,16,6,6);
             g2.setColor(new Color(220,220,100));
-            g2.drawString(label,mx-lw/2,my);
+            g2.drawString(a.label, lx-lw/2, ly);
         }
     }
 
@@ -409,12 +465,43 @@ public class NodeCanvas extends JPanel {
                        new int[]{tip.y,tip.y-sz,tip.y-sz},3);
     }
 
+    /** Check if point p is near the orthogonal arrow segments */
+    private boolean arrowHitTest(Arrow a, Point p) {
+        BaseNode from=nodes.get(a.fromNodeId), to=nodes.get(a.toNodeId);
+        if (from==null||to==null) return false;
+        Point src=from.outputAnchor(a.fromPort), dst=to.inputAnchor();
+        int bendY = src.y + a.bendOffset;
+        int tol = 6;
+        // Seg 1: src.x, src.y → src.x, bendY
+        if (nearSegment(p, src.x,src.y, src.x,bendY, tol)) return true;
+        // Seg 2: src.x, bendY → dst.x, bendY
+        if (nearSegment(p, src.x,bendY, dst.x,bendY, tol)) return true;
+        // Seg 3: dst.x, bendY → dst.x, dst.y
+        if (nearSegment(p, dst.x,bendY, dst.x,dst.y, tol)) return true;
+        return false;
+    }
+
+    private boolean nearSegment(Point p, int x1, int y1, int x2, int y2, int tol) {
+        int minX=Math.min(x1,x2)-tol, maxX=Math.max(x1,x2)+tol;
+        int minY=Math.min(y1,y2)-tol, maxY=Math.max(y1,y2)+tol;
+        if (p.x<minX||p.x>maxX||p.y<minY||p.y>maxY) return false;
+        // Distance from point to line segment
+        double dx=x2-x1, dy=y2-y1, len2=dx*dx+dy*dy;
+        if (len2==0) return p.distance(x1,y1)<tol;
+        double t=((p.x-x1)*dx+(p.y-y1)*dy)/len2;
+        t=Math.max(0,Math.min(1,t));
+        double nx=x1+t*dx, ny=y1+t*dy;
+        return p.distance(nx,ny)<tol;
+    }
+
     // ── Mouse handlers ────────────────────────────────────────
     private void handleMousePressed(MouseEvent e) {
         Point cv=screenToCanvas(e.getPoint());
+        requestFocusInWindow();
         if (SwingUtilities.isMiddleMouseButton(e)||(e.isAltDown()&&SwingUtilities.isLeftMouseButton(e))) {
             panning=true; panDragStartX=e.getX()-panX; panDragStartY=e.getY()-panY; return;
         }
+        // Check port dots
         for (BaseNode node:nodes.values()) {
             for (NodePort port:node.outputs) {
                 Point anchor=node.outputAnchor(port.name);
@@ -423,13 +510,48 @@ public class NodeCanvas extends JPanel {
                 }
             }
         }
+        // Check bend handle drag (selected arrow horizontal segment midpoint)
+        if (selectedArrow!=null) {
+            BaseNode from=nodes.get(selectedArrow.fromNodeId);
+            BaseNode to=nodes.get(selectedArrow.toNodeId);
+            if (from!=null&&to!=null) {
+                Point src=from.outputAnchor(selectedArrow.fromPort);
+                int bendY=(int)((src.y+selectedArrow.bendOffset)*zoom)+panY;
+                int hx=(int)(((src.x+to.inputAnchor().x)/2.0)*zoom)+panX;
+                Point screenHandle=new Point(hx,bendY);
+                if (e.getPoint().distance(screenHandle)<12) {
+                    bendDragArrow=selectedArrow;
+                    bendDragStartY=e.getY();
+                    bendDragOrigOffset=selectedArrow.bendOffset;
+                    return;
+                }
+            }
+        }
+        // Check node hit
         BaseNode hit=nodeAt(cv);
-        if (hit!=null) { dragNode=hit; dragOffX=cv.x-hit.x; dragOffY=cv.y-hit.y; selectNode(hit); }
-        else selectNode(null);
+        if (hit!=null) {
+            // Deselect arrow
+            if (selectedArrow!=null) { selectedArrow.selected=false; selectedArrow=null; }
+            dragNode=hit; dragOffX=cv.x-hit.x; dragOffY=cv.y-hit.y; selectNode(hit);
+        } else {
+            // Check arrow hit
+            Arrow hitArrow=null;
+            for (Arrow a:arrows) { if (arrowHitTest(a,cv)) { hitArrow=a; break; } }
+            if (hitArrow!=null) {
+                if (selectedArrow!=null) selectedArrow.selected=false;
+                selectedArrow=hitArrow; hitArrow.selected=true;
+                if (selectedNode!=null) { selectedNode=null; if(onNodeSelected!=null) onNodeSelected.accept(null); }
+            } else {
+                if (selectedArrow!=null) { selectedArrow.selected=false; selectedArrow=null; }
+                selectNode(null);
+            }
+            repaint();
+        }
     }
 
     private void handleMouseReleased(MouseEvent e) {
         panning=false;
+        if (bendDragArrow!=null) { bendDragArrow=null; notifyChanged(); return; }
         if (connectFrom!=null) {
             Point cv=screenToCanvas(e.getPoint());
             BaseNode target=nodeAt(cv);
@@ -449,6 +571,11 @@ public class NodeCanvas extends JPanel {
 
     private void handleMouseDragged(MouseEvent e) {
         if (panning) { panX=e.getX()-panDragStartX; panY=e.getY()-panDragStartY; repaint(); return; }
+        if (bendDragArrow!=null) {
+            int dy=(int)((e.getY()-bendDragStartY)/zoom);
+            bendDragArrow.bendOffset=Math.max(10, bendDragOrigOffset+dy);
+            repaint(); return;
+        }
         if (connectFrom!=null) { connectMouse=e.getPoint(); repaint(); return; }
         if (dragNode!=null) {
             Point cv=screenToCanvas(e.getPoint());
@@ -475,6 +602,12 @@ public class NodeCanvas extends JPanel {
             addMenuHeader(menu, "Node: "+hit.label);
             addMenuItem(menu,"Edit settings",()->{ if(onNodeDoubleClick!=null) onNodeDoubleClick.accept(hit); });
             addMenuItem(menu,hit.branchEnabled?"Disable node":"Enable node",()->{hit.branchEnabled=!hit.branchEnabled;repaint();notifyChanged();});
+            addMenuSep(menu);
+            String startTxt = hit.id.equals(startNodeId) ? "★ Start node (click to unset)" : "▶ Set as start node";
+            addMenuItem(menu, startTxt, ()->{
+                startNodeId = hit.id.equals(startNodeId) ? null : hit.id;
+                repaint(); notifyChanged();
+            });
             addMenuSep(menu);
             addMenuItem(menu,"Delete node",()->removeNode(hit));
         } else {

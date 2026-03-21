@@ -157,8 +157,11 @@ public class TreeTab extends JPanel {
         if (treeRunning) return;
         Map<String, BaseNode> nodeMap = canvas.getNodes();
         if (nodeMap.isEmpty()) { JOptionPane.showMessageDialog(this,"No nodes on canvas.\nClick a node from the palette above to add one."); return; }
-        String startId = findStartNode(nodeMap);
-        if (startId == null) { JOptionPane.showMessageDialog(this,"Could not find a start node."); return; }
+        // Use explicit start node if set, otherwise auto-detect
+        String startId = canvas.getStartNodeId();
+        if (startId == null || !nodeMap.containsKey(startId))
+            startId = findStartNode(nodeMap);
+        if (startId == null) { JOptionPane.showMessageDialog(this,"Could not find a start node.\nRight-click a node → Set as start node."); return; }
         try {
             ExecutionContext ctx = new ExecutionContext(new java.awt.Robot(), treeId);
             engine = new RuleEngine(nodeMap, startId, ctx);
@@ -178,7 +181,7 @@ public class TreeTab extends JPanel {
             // Hide main window and show run HUD
             Window w = SwingUtilities.getWindowAncestor(this);
             if (w!=null) w.setVisible(false);
-            showRunHud();
+            showRunHud(ctx);
             Thread t = new Thread(engine); t.setDaemon(true); t.start();
         } catch (Exception ex) { ex.printStackTrace(); }
     }
@@ -197,7 +200,7 @@ public class TreeTab extends JPanel {
     // ── Run HUD — small floating bar shown while tree is running ──
     private JWindow runHud;
 
-    private void showRunHud() {
+    private void showRunHud(engine.ExecutionContext ctx) {
         runHud = new JWindow();
         runHud.setAlwaysOnTop(true);
         runHud.setFocusableWindowState(false);
@@ -216,29 +219,49 @@ public class TreeTab extends JPanel {
         bar.setOpaque(false);
         bar.setLayout(new FlowLayout(FlowLayout.CENTER,12,7));
 
-        JLabel running = new JLabel("● Running: "+treeName);
-        running.setFont(new Font("SansSerif",Font.BOLD,12));
-        running.setForeground(new Color(40,220,80));
+        JLabel dotLbl = new JLabel("●");
+        dotLbl.setFont(new Font("SansSerif",Font.BOLD,12));
+        dotLbl.setForeground(new Color(40,220,80));
 
-        JLabel hint = new JLabel("  Press hotkey to stop");
-        hint.setFont(new Font("SansSerif",Font.PLAIN,11));
-        hint.setForeground(new Color(140,140,160));
+        JLabel taskLbl = new JLabel(treeName);
+        taskLbl.setFont(new Font("SansSerif",Font.BOLD,12));
+        taskLbl.setForeground(new Color(200,200,220));
+
+        JLabel sepLbl = new JLabel("|");
+        sepLbl.setForeground(new Color(60,60,80));
+
+        JLabel nodeLbl = new JLabel("Starting…");
+        nodeLbl.setFont(new Font("SansSerif",Font.PLAIN,11));
+        nodeLbl.setForeground(new Color(140,200,255));
+
+        JLabel detailLbl = new JLabel("");
+        detailLbl.setFont(new Font("Monospaced",Font.BOLD,11));
+        detailLbl.setForeground(new Color(80,220,120));
 
         JButton stopBtn = new JButton("■ Stop");
-        stopBtn.setBackground(new Color(180,50,50));
+        stopBtn.setBackground(new Color(160,40,40));
         stopBtn.setForeground(Color.WHITE); stopBtn.setOpaque(true);
         stopBtn.setBorderPainted(false); stopBtn.setFocusPainted(false);
         stopBtn.setFont(new Font("SansSerif",Font.BOLD,11));
         stopBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         stopBtn.addActionListener(e -> stopTree());
 
-        bar.add(running); bar.add(hint); bar.add(stopBtn);
+        bar.add(dotLbl); bar.add(taskLbl);
+        bar.add(sepLbl); bar.add(nodeLbl); bar.add(detailLbl);
+        bar.add(stopBtn);
+
+        // Wire status callback so nodes can update HUD live
+        ctx.setStatusCallback((nodeName, detail) -> SwingUtilities.invokeLater(() -> {
+            nodeLbl.setText(nodeName);
+            detailLbl.setText("  " + detail);
+            runHud.pack();
+        }));
 
         // Pulse the dot
         javax.swing.Timer pulse = new javax.swing.Timer(600, e -> {
             if (!treeRunning) { ((javax.swing.Timer)e.getSource()).stop(); return; }
-            boolean on = running.getForeground().equals(new Color(40,220,80));
-            running.setForeground(on ? new Color(20,140,50) : new Color(40,220,80));
+            boolean on = dotLbl.getForeground().equals(new Color(40,220,80));
+            dotLbl.setForeground(on ? new Color(20,140,50) : new Color(40,220,80));
         });
         pulse.start();
 

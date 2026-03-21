@@ -6,21 +6,16 @@ import java.awt.Robot;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/**
- * RuleEngine — walks the node graph and executes each node in sequence.
- * Runs on its own thread. Notifies UI of state changes via callbacks.
- */
 public class RuleEngine implements Runnable {
 
-    private final Map<String, BaseNode> nodes;     // all nodes in the tree, keyed by id
+    private final Map<String, BaseNode> nodes;
     private final String                startNodeId;
     private final ExecutionContext      ctx;
     private volatile boolean            running = true;
 
-    // UI callbacks
-    private Consumer<BaseNode> onNodeStart;    // node began executing
-    private Consumer<BaseNode> onNodeFinish;   // node finished (with state set)
-    private Runnable           onTreeFinish;   // whole tree is done
+    private Consumer<BaseNode> onNodeStart;
+    private Consumer<BaseNode> onNodeFinish;
+    private Runnable           onTreeFinish;
 
     public RuleEngine(Map<String, BaseNode> nodes, String startNodeId, ExecutionContext ctx) {
         this.nodes       = nodes;
@@ -28,28 +23,26 @@ public class RuleEngine implements Runnable {
         this.ctx         = ctx;
     }
 
-    public void setOnNodeStart(Consumer<BaseNode> cb)  { onNodeStart   = cb; }
-    public void setOnNodeFinish(Consumer<BaseNode> cb) { onNodeFinish  = cb; }
-    public void setOnTreeFinish(Runnable cb)           { onTreeFinish  = cb; }
+    public void setOnNodeStart(Consumer<BaseNode> cb)  { onNodeStart  = cb; }
+    public void setOnNodeFinish(Consumer<BaseNode> cb) { onNodeFinish = cb; }
+    public void setOnTreeFinish(Runnable cb)           { onTreeFinish = cb; }
 
     public void stop() { running = false; ctx.forceStop(); }
 
     @Override
     public void run() {
+        boolean naturalFinish = false;
         try {
             String currentId = startNodeId;
             while (currentId != null && running && ctx.isRunning()) {
                 BaseNode node = nodes.get(currentId);
                 if (node == null || !node.branchEnabled) break;
 
-                // Entry delay
                 if (node.entryDelayMs > 0) Thread.sleep(node.entryDelayMs);
 
-                // Notify UI: node starting
                 node.setRunState(RunState.RUNNING);
                 if (onNodeStart != null) onNodeStart.accept(node);
 
-                // Execute
                 String portResult = null;
                 try {
                     portResult = node.execute(ctx);
@@ -60,31 +53,31 @@ public class RuleEngine implements Runnable {
                     break;
                 }
 
-                // Notify UI: node done
                 if (onNodeFinish != null) onNodeFinish.accept(node);
 
-                // Null = terminal (Stop node)
-                if (portResult == null) break;
+                // null = Stop node or terminal
+                if (portResult == null) { naturalFinish = true; break; }
 
-                // Follow the matching output port
+                // Follow matching output port
                 String nextId = null;
                 for (BaseNode.NodePort port : node.outputs) {
                     if (port.name.equals(portResult) && port.enabled) {
-                        // Arrow delay
                         if (port.arrowDelayMs > 0) Thread.sleep(port.arrowDelayMs);
                         nextId = port.targetNodeId;
                         break;
                     }
                 }
                 currentId = nextId;
+                // nextId == null means unconnected port — exit without reopening app
             }
         } catch (InterruptedException ignored) {
         } finally {
-            // Reset all node run states after a short display window
+            // Only notify (reopen app) if user stopped it or it reached a Stop node
+            final boolean notify = !running || naturalFinish;
             new Thread(() -> {
-                try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(800); } catch (InterruptedException ignored) {}
                 for (BaseNode n : nodes.values()) n.setRunState(RunState.IDLE);
-                if (onTreeFinish != null) onTreeFinish.run();
+                if (notify && onTreeFinish != null) onTreeFinish.run();
             }).start();
         }
     }

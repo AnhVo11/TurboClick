@@ -18,8 +18,6 @@ public class ExecutionContext {
     private          TreeStopCallback stopAllCallback;
     private          HudCallback      hudCallback;
     private          MessageCallback  msgCallback;
-    private volatile int lastMatchX = -1;
-    private volatile int lastMatchY = -1;
 
     public ExecutionContext(Robot robot, String treeId) {
         this.robot  = robot;
@@ -39,6 +37,18 @@ public class ExecutionContext {
         if (stopAllCallback != null) stopAllCallback.stopAll();
     }
 
+    // ── Live HUD status ──────────────────────────────────────
+    private volatile String hudNodeName   = "";
+    private volatile String hudDetail     = "";
+    private volatile StatusCallback statusCallback;
+
+    public void setHudStatus(String nodeName, String detail) {
+        hudNodeName = nodeName; hudDetail = detail;
+        if (statusCallback != null) statusCallback.update(nodeName, detail);
+    }
+    public void setStatusCallback(StatusCallback cb) { statusCallback = cb; }
+    public interface StatusCallback { void update(String nodeName, String detail); }
+
     // ── HUD countdown display ────────────────────────────────
     public void setCountdown(String imageName, int ms) {
         if (hudCallback != null) hudCallback.showCountdown(imageName, ms);
@@ -48,11 +58,6 @@ public class ExecutionContext {
     }
 
     // ── Message notification ─────────────────────────────────
-    public void setLastMatchX(int x) { lastMatchX = x; }
-    public void setLastMatchY(int y) { lastMatchY = y; }
-    public int  getLastMatchX()      { return lastMatchX; }
-    public int  getLastMatchY()      { return lastMatchY; }
-
     public void showMessage(String msg) {
         if (msgCallback != null) msgCallback.show(msg);
     }
