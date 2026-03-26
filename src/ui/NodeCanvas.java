@@ -227,12 +227,12 @@ public class NodeCanvas extends JPanel {
 
     private static String nodeTypeBadge(BaseNode.NodeType type) {
         switch(type) {
-            case WATCH_ZONE:   return "◎";   // eye/watch symbol
+            case WATCH_ZONE:   return "◎";
             case CLICK:        return "↗";
-            case SIMPLE_CLICK: return "⊕";   // click/add symbol
+            case SIMPLE_CLICK: return "⊕";
             case CONDITION:    return "?";
             case LOOP:         return "↺";
-            case WAIT:         return "⏸";
+            case WAIT:         return "⏱";
             case STOP:         return "■";
             default:           return "•";
         }
@@ -285,10 +285,18 @@ public class NodeCanvas extends JPanel {
         g2.setStroke(new BasicStroke(1.5f));
         g2.drawRoundRect(cx,cy,180,75,12,12);
         g2.setColor(Color.WHITE);
-        g2.setFont(new Font("SansSerif",Font.BOLD,14));
-        g2.setColor(NodeFactory.color(ghostType).brighter());
-        // icon
-        try { BaseNode tmp=NodeFactory.create(ghostType,0,0); g2.drawString(tmp.nodeIcon(), cx+8, cy+26); } catch(Exception ex){}
+        // Badge circle (same as drawn nodes)
+        Color ic = NodeFactory.color(ghostType).brighter();
+        g2.setColor(ic);
+        g2.fillOval(cx+7, cy+8, 22, 22);
+        g2.setColor(Color.WHITE);
+        String badge = nodeTypeBadge(ghostType);
+        Font badgeFont = new Font("Dialog", Font.BOLD, 12);
+        g2.setFont(badgeFont);
+        FontMetrics bfm = g2.getFontMetrics();
+        int bx = cx+7 + (22 - bfm.stringWidth(badge))/2;
+        int by = cy+8 + (22 - bfm.getHeight())/2 + bfm.getAscent();
+        g2.drawString(badge, bx, by);
         g2.setFont(new Font("SansSerif",Font.BOLD,11));
         g2.setColor(Color.WHITE);
         g2.drawString(NodeFactory.displayName(ghostType), cx+30, cy+26);
@@ -335,18 +343,18 @@ public class NodeCanvas extends JPanel {
         // Disabled overlay
         if (!node.branchEnabled) { g2.setColor(new Color(0,0,0,120)); g2.fillRoundRect(x,y,w,h,12,12); }
 
-        // Icon badge — try emoji font first, fallback to colored circle
+        // Icon badge — colored circle with centered symbol
         Color ic = node.nodeColor().brighter();
         g2.setColor(ic);
-        g2.fillOval(x+7, y+7, 22, 22);
+        g2.fillOval(x+7, y+8, 22, 22);
         g2.setColor(Color.WHITE);
-        // Try Apple Color Emoji font for macOS
-        Font emojiFont = new Font("Dialog", Font.BOLD, 12);
-        g2.setFont(emojiFont);
         String badge = nodeTypeBadge(node.type);
+        Font badgeFont = new Font("Dialog", Font.BOLD, 12);
+        g2.setFont(badgeFont);
         FontMetrics bfm = g2.getFontMetrics();
-        int bx = x+7+(22-bfm.stringWidth(badge))/2;
-        g2.drawString(badge, bx, y+7+16);
+        int bx = x+7 + (22 - bfm.stringWidth(badge))/2;
+        int by = y+8 + (22 - bfm.getHeight())/2 + bfm.getAscent();
+        g2.drawString(badge, bx, by);
 
         // Label
         g2.setFont(new Font("SansSerif",Font.BOLD,11)); g2.setColor(Color.WHITE);
@@ -639,7 +647,16 @@ public class NodeCanvas extends JPanel {
         item.setForeground(new Color(210,210,220));
         item.setFont(new Font("SansSerif",Font.PLAIN,12));
         item.setBorderPainted(false);
-        item.setBorder(BorderFactory.createEmptyBorder(4,10,4,10));
+        item.setBorder(BorderFactory.createEmptyBorder(5,12,5,12));
+        item.setOpaque(true);
+        // Override selection color — no green
+        item.setUI(new javax.swing.plaf.basic.BasicMenuItemUI(){
+            protected void paintBackground(Graphics g,JMenuItem mi,Color bgColor){
+                g.setColor(mi.isArmed()||mi.isSelected()
+                    ? new Color(50,50,68) : new Color(30,30,42));
+                g.fillRect(0,0,mi.getWidth(),mi.getHeight());
+            }
+        });
         item.addActionListener(e->action.run());
         m.add(item);
     }
@@ -650,8 +667,8 @@ public class NodeCanvas extends JPanel {
         item.setForeground(new Color(210,210,220));
         item.setFont(new Font("SansSerif",Font.PLAIN,12));
         item.setBorderPainted(false);
-        item.setBorder(BorderFactory.createEmptyBorder(4,10,4,10));
-        // Color indicator strip on left
+        item.setBorder(BorderFactory.createEmptyBorder(5,12,5,12));
+        item.setOpaque(true);
         item.setIcon(new javax.swing.Icon(){
             public void paintIcon(Component c,Graphics g,int x,int y){
                 g.setColor(accent); g.fillRoundRect(x,y+1,4,getIconHeight()-2,3,3);
@@ -659,10 +676,22 @@ public class NodeCanvas extends JPanel {
             public int getIconWidth(){ return 8; }
             public int getIconHeight(){ return 14; }
         });
+        item.setUI(new javax.swing.plaf.basic.BasicMenuItemUI(){
+            protected void paintBackground(Graphics g,JMenuItem mi,Color bgColor){
+                g.setColor(mi.isArmed()||mi.isSelected()
+                    ? new Color(50,50,68) : new Color(30,30,42));
+                g.fillRect(0,0,mi.getWidth(),mi.getHeight());
+            }
+        });
         item.addActionListener(e->action.run());
         m.add(item);
     }
-    private void addMenuSep(JPopupMenu m) { JSeparator s=new JSeparator(); s.setForeground(new Color(60,60,70)); m.add(s); }
+    private void addMenuSep(JPopupMenu m) {
+        JSeparator s=new JSeparator();
+        s.setForeground(new Color(55,55,68));
+        s.setBackground(new Color(30,30,42));
+        m.add(s);
+    }
 
     private BaseNode nodeAt(Point cv) {
         List<BaseNode> list=new ArrayList<>(nodes.values());

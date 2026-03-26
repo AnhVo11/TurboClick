@@ -9,16 +9,18 @@ import java.awt.image.BufferedImage;
 // ═══════════════════════════════════════════════════════════════
 class WatchZoneNode extends BaseNode {
 
-    public String       imageName       = "Unnamed Image";
-    public BufferedImage template       = null;   // captured reference (transient for JSON)
-    public Rectangle    watchZone       = null;   // screen area to scan
-    public int          matchThreshold  = 85;     // 0-100 %
-    public int          pollIntervalMs  = 500;
-    public int          preTriggerDelayMs = 0;    // countdown before firing
-    public int          timeoutMs       = 0;      // 0 = wait forever
-    public boolean      clickAtMatch    = true;   // click where found
-    public int          clickX = -1, clickY = -1; // custom click coord if not clickAtMatch
-    public int          retryCount      = 0;      // retries before timeout branch
+    public String        imageName         = "Unnamed Image";
+    public BufferedImage template          = null;
+    public Rectangle     watchZone         = null;
+    public Rectangle     captureRect       = null;   // rect used when capturing template
+    public boolean       sameAsCapture     = false;  // use captureRect as watchZone
+    public int           matchThreshold    = 85;
+    public int           pollIntervalMs    = 500;
+    public int           preTriggerDelayMs = 0;
+    public int           timeoutMs         = 0;
+    public boolean       clickAtMatch      = true;
+    public int           clickX = -1, clickY = -1;
+    public int           retryCount        = 0;
 
     public WatchZoneNode(int x, int y) {
         super(NodeType.WATCH_ZONE, "Watch Zone", x, y);
@@ -29,6 +31,8 @@ class WatchZoneNode extends BaseNode {
 
     @Override
     public String execute(ExecutionContext ctx) throws InterruptedException {
+        // If sameAsCapture, use the captureRect as the watchZone at runtime
+        if (sameAsCapture && captureRect != null) watchZone = captureRect;
         if (template == null || watchZone == null) return "Not Found";
 
         long deadline = timeoutMs > 0 ? System.currentTimeMillis() + timeoutMs : Long.MAX_VALUE;
@@ -68,7 +72,7 @@ class WatchZoneNode extends BaseNode {
     }
 
     @Override public Color  nodeColor() { return new Color(50, 130, 200); }
-    @Override public String nodeIcon()  { return "👁"; }
+    @Override public String nodeIcon()  { return "◎"; }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -104,7 +108,7 @@ class ClickNode extends BaseNode {
     }
 
     @Override public Color  nodeColor() { return new Color(80, 160, 80); }
-    @Override public String nodeIcon()  { return "🖱"; }
+    @Override public String nodeIcon()  { return "↗"; }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -147,7 +151,7 @@ class SimpleClickNode extends BaseNode {
     }
 
     @Override public Color  nodeColor() { return new Color(120, 60, 180); }
-    @Override public String nodeIcon()  { return "⚡"; }
+    @Override public String nodeIcon()  { return "⊕"; }
 }
 
 // ═══════════════════════════════════════════════════════════════

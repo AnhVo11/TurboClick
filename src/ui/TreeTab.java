@@ -119,10 +119,20 @@ public class TreeTab extends JPanel {
         nameLbl.setForeground(new Color(200,200,220));
         nameLbl.setFont(new Font("SansSerif",Font.BOLD,12));
 
-        JButton runBtn   = toolBtn("  Run",   new Color(40,160,80));
-        JButton stopBtn  = toolBtn("  Stop",  new Color(180,50,50));
-        JButton fitBtn   = toolBtn("Fit View",new Color(60,60,80));
-        JButton clearBtn = toolBtn("Clear",   new Color(100,50,50));
+        JButton runBtn   = toolBtn("▶  Run",   new Color(40,200,80));
+        JButton stopBtn  = toolBtn("■  Stop",  new Color(220,70,70));
+        JButton fitBtn   = toolBtn("Fit View", new Color(100,100,130));
+        JButton clearBtn = toolBtn("Clear",    new Color(150,60,60));
+
+        JButton loopBtn = toolBtn("↺  Loop", new Color(220,180,40));
+        loopBtn.addActionListener(e -> {
+            if (treeRunning) stopTree();
+            else {
+                // Loop mode — restart tree when it finishes
+                loopBtn.setForeground(new Color(255,220,60));
+                startTreeLoop(loopBtn);
+            }
+        });
 
         runBtn.addActionListener(e   -> startTree());
         stopBtn.addActionListener(e  -> stopTree());
@@ -132,16 +142,16 @@ public class TreeTab extends JPanel {
             if (r == JOptionPane.YES_OPTION) { canvas.getNodes().clear(); canvas.repaint(); }
         });
 
-        JButton zoomInBtn  = toolBtn("+",  new Color(55,55,75));
-        JButton zoomOutBtn = toolBtn("-",  new Color(55,55,75));
-        JButton zoomRstBtn = toolBtn("1:1",new Color(55,55,75));
+        JButton zoomInBtn  = toolBtn("+",  new Color(90,90,120));
+        JButton zoomOutBtn = toolBtn("-",  new Color(90,90,120));
+        JButton zoomRstBtn = toolBtn("1:1",new Color(90,90,120));
         zoomInBtn.addActionListener(e  -> canvas.zoomIn());
         zoomOutBtn.addActionListener(e -> canvas.zoomOut());
         zoomRstBtn.addActionListener(e -> canvas.zoomReset());
 
         bar.add(dot); bar.add(nameLbl);
         bar.add(Box.createHorizontalStrut(10));
-        bar.add(runBtn); bar.add(stopBtn);
+        bar.add(runBtn); bar.add(loopBtn); bar.add(stopBtn);
         bar.add(Box.createHorizontalStrut(8));
         bar.add(fitBtn); bar.add(clearBtn);
         bar.add(Box.createHorizontalStrut(8));
@@ -186,7 +196,39 @@ public class TreeTab extends JPanel {
         } catch (Exception ex) { ex.printStackTrace(); }
     }
 
+    private volatile boolean looping = false;
+
+    private void startTreeLoop(JButton loopBtn) {
+        looping = true;
+        loopBtn.setText("↺  Looping");
+        Runnable loop = new Runnable() {
+            public void run() {
+                if (!looping) {
+                    loopBtn.setText("↺  Loop");
+                    loopBtn.setForeground(new Color(220,180,40));
+                    return;
+                }
+                startTree();
+                // After tree finishes, restart if still looping
+                new Thread(() -> {
+                    while (treeRunning) {
+                        try { Thread.sleep(200); } catch(InterruptedException ignored) {}
+                    }
+                    if (looping) SwingUtilities.invokeLater(this::run);
+                    else {
+                        SwingUtilities.invokeLater(() -> {
+                            loopBtn.setText("↺  Loop");
+                            loopBtn.setForeground(new Color(220,180,40));
+                        });
+                    }
+                }).start();
+            }
+        };
+        SwingUtilities.invokeLater(loop);
+    }
+
     public void stopTree() {
+        looping = false;
         if (engine != null) engine.stop();
         treeRunning = false;
         SwingUtilities.invokeLater(() -> {
@@ -288,12 +330,20 @@ public class TreeTab extends JPanel {
         return null;
     }
 
-    private JButton toolBtn(String text, Color bg) {
+    private JButton toolBtn(String text, Color borderColor) {
         JButton b = new JButton(text);
         b.setFont(new Font("SansSerif",Font.BOLD,11));
-        b.setBackground(bg); b.setForeground(Color.WHITE); b.setOpaque(true);
-        b.setFocusPainted(false); b.setBorderPainted(false);
+        b.setBackground(new Color(28,28,38));
+        b.setForeground(borderColor);
+        b.setOpaque(true); b.setFocusPainted(false);
+        b.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(borderColor, 1),
+            BorderFactory.createEmptyBorder(4,10,4,10)));
         b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        b.addMouseListener(new java.awt.event.MouseAdapter(){
+            public void mouseEntered(java.awt.event.MouseEvent e){ b.setBackground(new Color(40,40,55)); }
+            public void mouseExited(java.awt.event.MouseEvent e) { b.setBackground(new Color(28,28,38)); }
+        });
         return b;
     }
 

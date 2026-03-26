@@ -21,7 +21,7 @@ public class NodePalette extends JPanel {
         BaseNode.NodeType.WAIT,
         BaseNode.NodeType.STOP
     };
-    private static final String[] ICONS = { "◎","⊕","⏸","■" };
+    private static final String[] ICONS = { "◎","⊕","⏱","■" };
     private static final String[] NAMES = { "Watch Zone","Simple Click","Wait","Stop" };
 
     // Ghost drag state
