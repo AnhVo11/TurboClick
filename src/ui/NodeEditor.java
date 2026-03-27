@@ -129,6 +129,7 @@ public class NodeEditor extends JPanel {
             case LOOP:         buildLoop();         break;
             case WAIT:         buildWait();         break;
             case STOP:         buildStop();         break;
+            case KEYBOARD:     buildKeyboard();     break;
         }
 
         if (!currentNode.outputs.isEmpty()) {
@@ -636,6 +637,282 @@ public class NodeEditor extends JPanel {
         addLabeledSpinner("Loop count",     getIntField("loopCount",3),   1,    9999,  val -> setIntField("loopCount", val));
         addLabeledSpinner("Loop delay (ms)",getIntField("loopDelayMs",0), 0,   60000,  val -> setIntField("loopDelayMs", val));
         addLabeledSpinner("Match %",        getIntField("matchThreshold",85), 10, 100, val -> setIntField("matchThreshold", val));
+    }
+
+    // =========================================================
+    //  KEYBOARD
+    // =========================================================
+    private void buildKeyboard() {
+        addSection("Mode");
+
+        String[] modes = {"Type Text", "Hotkey Combo", "Single Key", "Record"};
+        int currentMode = getIntField("mode", 0);
+        addCombo("Action mode", modes, currentMode, val -> {
+            setIntField("mode", val); rebuild();
+        });
+
+        addLabeledSpinner("Repeat count",     getIntField("repeatCount",1),    1, 999,   val -> setIntField("repeatCount", val));
+        addLabeledSpinner("Repeat delay (ms)", getIntField("repeatDelayMs",100),0, 10000, val -> setIntField("repeatDelayMs", val));
+
+        if (currentMode == 0) {
+            // ── Type Text mode ────────────────────────────────
+            addSection("Text to Type");
+
+            JTextArea textArea = new JTextArea(getStrField("typeText",""), 3, 20);
+            textArea.setFont(new Font("Monospaced",Font.PLAIN,12));
+            textArea.setBackground(new Color(35,35,50)); textArea.setForeground(new Color(220,220,230));
+            textArea.setCaretColor(new Color(220,220,230));
+            textArea.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(60,60,85)),
+                BorderFactory.createEmptyBorder(4,6,4,6)));
+            textArea.setLineWrap(true);
+            textArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener(){
+                public void insertUpdate(javax.swing.event.DocumentEvent e)  { setStrField("typeText", textArea.getText()); }
+                public void removeUpdate(javax.swing.event.DocumentEvent e)  { setStrField("typeText", textArea.getText()); }
+                public void changedUpdate(javax.swing.event.DocumentEvent e) { setStrField("typeText", textArea.getText()); }
+            });
+            JScrollPane tsp = new JScrollPane(textArea);
+            tsp.setAlignmentX(LEFT_ALIGNMENT);
+            tsp.setMaximumSize(new Dimension(240,80));
+            tsp.setBorder(null);
+            content.add(Box.createVerticalStrut(4));
+            content.add(tsp);
+
+            addLabeledSpinner("Char delay (ms)", getIntField("charDelayMs",50), 0, 1000, val -> setIntField("charDelayMs", val));
+
+            addSection("Special Keys");
+            addInfo("Click to append to text");
+            buildSpecialKeyGrid(textArea);
+
+        } else if (currentMode == 1) {
+            // ── Hotkey Combo mode ─────────────────────────────
+            addSection("Hotkey Combination");
+            addInfo("e.g.  ctrl+c   ctrl+shift+t   alt+f4");
+
+            JTextField hotkeyField = new JTextField(getStrField("hotkeyCombo",""), 15);
+            hotkeyField.setFont(new Font("Monospaced",Font.PLAIN,13));
+            hotkeyField.setBackground(new Color(35,35,50)); hotkeyField.setForeground(new Color(220,220,230));
+            hotkeyField.setCaretColor(new Color(220,220,230));
+            hotkeyField.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(60,60,85)),
+                BorderFactory.createEmptyBorder(4,8,4,8)));
+            hotkeyField.setHorizontalAlignment(JTextField.CENTER);
+            hotkeyField.addActionListener(e -> setStrField("hotkeyCombo", hotkeyField.getText()));
+            hotkeyField.addFocusListener(new FocusAdapter(){ public void focusLost(FocusEvent e){ setStrField("hotkeyCombo", hotkeyField.getText()); }});
+            JPanel hfRow = new JPanel(new FlowLayout(FlowLayout.LEFT,8,4));
+            hfRow.setBackground(BG); hfRow.setAlignmentX(LEFT_ALIGNMENT);
+            hfRow.add(hotkeyField);
+            content.add(hfRow);
+
+            addSection("Quick Combos");
+            String[][] combos = {
+                {"Ctrl+C","ctrl+c"}, {"Ctrl+V","ctrl+v"}, {"Ctrl+X","ctrl+x"},
+                {"Ctrl+Z","ctrl+z"}, {"Ctrl+A","ctrl+a"}, {"Ctrl+S","ctrl+s"},
+                {"Alt+F4","alt+f4"}, {"Ctrl+W","ctrl+w"}, {"Ctrl+T","ctrl+t"},
+                {"Alt+Tab","alt+tab"}, {"Cmd+Tab","meta+tab"}, {"Cmd+Space","meta+space"}
+            };
+            buildComboGrid(combos, hotkeyField);
+
+        } else if (currentMode == 2) {
+            // ── Single Key mode ───────────────────────────────
+            addSection("Key to Press");
+            String[] keyNames = {
+                "ENTER","ESCAPE","TAB","SPACE","BACKSPACE","DELETE",
+                "UP","DOWN","LEFT","RIGHT","HOME","END","PAGEUP","PAGEDOWN",
+                "F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"
+            };
+            String current = getStrField("singleKey","ENTER");
+            addCombo("Key", keyNames, java.util.Arrays.asList(keyNames).indexOf(current),
+                val -> setStrField("singleKey", keyNames[Math.max(0,val)]));
+
+        } else {
+            // ── Record mode ───────────────────────────────────
+            addSection("Record Keystrokes");
+            addInfo("Click Record, type on keyboard, click Stop");
+
+            // Show currently recorded text
+            String recorded = getStrField("typeText","");
+            JLabel recPreview = new JLabel(recorded.isEmpty() ? "(nothing recorded yet)" : recorded);
+            recPreview.setFont(new Font("Monospaced",Font.PLAIN,11));
+            recPreview.setForeground(recorded.isEmpty() ? new Color(80,80,100) : new Color(180,220,255));
+            recPreview.setBorder(new EmptyBorder(4,8,4,8));
+            recPreview.setAlignmentX(LEFT_ALIGNMENT);
+            content.add(recPreview);
+
+            // Record / Stop buttons
+            JPanel recBtns = new JPanel(new FlowLayout(FlowLayout.LEFT,6,4));
+            recBtns.setBackground(BG); recBtns.setAlignmentX(LEFT_ALIGNMENT);
+            JButton recBtn  = editorBtn("⏺  Record", new Color(200,40,40));
+            JButton stopRecBtn = editorBtn("⏹  Stop", new Color(60,60,80));
+            JButton clearRecBtn = editorBtn("Clear", new Color(60,60,80));
+            stopRecBtn.setEnabled(false);
+
+            // StringBuilder to accumulate recorded keys
+            StringBuilder recorded_sb = new StringBuilder(recorded);
+            boolean[] isRecording = {false};
+
+            // Use jNativeHook to capture global keystrokes while recording
+            com.github.kwhat.jnativehook.keyboard.NativeKeyListener[] recListener = {null};
+
+            Runnable stopRec = () -> {
+                isRecording[0] = false;
+                recBtn.setEnabled(true);
+                stopRecBtn.setEnabled(false);
+                recBtn.setText("⏺  Record");
+                if (recListener[0] != null) {
+                    try { com.github.kwhat.jnativehook.GlobalScreen.removeNativeKeyListener(recListener[0]); }
+                    catch (Exception ignored) {}
+                    recListener[0] = null;
+                }
+                setStrField("typeText", recorded_sb.toString());
+                // Switch mode to Type Text so it actually uses the recorded text
+                setIntField("mode", 0);
+                SwingUtilities.invokeLater(this::rebuild);
+            };
+
+            recBtn.addActionListener(e -> {
+                isRecording[0] = true;
+                recBtn.setEnabled(false);
+                stopRecBtn.setEnabled(true);
+                recBtn.setText("⏺  Recording...");
+                recorded_sb.setLength(0);
+                recPreview.setText("(recording...)");
+                recPreview.setForeground(new Color(255,80,80));
+
+                recListener[0] = new com.github.kwhat.jnativehook.keyboard.NativeKeyListener() {
+                    public void nativeKeyPressed(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent ev) {
+                        if (!isRecording[0]) return;
+                        int code = ev.getKeyCode();
+                        String keyText = com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.getKeyText(code);
+                        // Map to bracket tag or char
+                        String append = mapNativeKey(code, ev.getModifiers());
+                        if (append != null) {
+                            recorded_sb.append(append);
+                            SwingUtilities.invokeLater(() -> {
+                                recPreview.setText(recorded_sb.toString());
+                                recPreview.setForeground(new Color(180,220,255));
+                            });
+                        }
+                    }
+                    public void nativeKeyReleased(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent ev) {}
+                    public void nativeKeyTyped(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent ev) {}
+                };
+                try { com.github.kwhat.jnativehook.GlobalScreen.addNativeKeyListener(recListener[0]); }
+                catch (Exception ex) { ex.printStackTrace(); }
+            });
+
+            stopRecBtn.addActionListener(e -> stopRec.run());
+            clearRecBtn.addActionListener(e -> {
+                recorded_sb.setLength(0);
+                setStrField("typeText","");
+                recPreview.setText("(nothing recorded yet)");
+                recPreview.setForeground(new Color(80,80,100));
+            });
+
+            recBtns.add(recBtn); recBtns.add(stopRecBtn); recBtns.add(clearRecBtn);
+            content.add(recBtns);
+
+            addLabeledSpinner("Char delay (ms)", getIntField("charDelayMs",50), 0, 1000, val -> setIntField("charDelayMs", val));
+        }
+    }
+
+    /** Map a NativeKeyEvent code to a string to insert into typeText */
+    private String mapNativeKey(int code, int mods) {
+        boolean ctrl  = (mods & com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.CTRL_MASK)  != 0;
+        boolean alt   = (mods & com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.ALT_MASK)   != 0;
+        boolean shift = (mods & com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.SHIFT_MASK) != 0;
+        boolean meta  = (mods & com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.META_MASK)  != 0;
+
+        // Modifier-only keys — skip by checking key text
+        String keyText = com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.getKeyText(code);
+        if (keyText.equals("Shift") || keyText.equals("Ctrl") || keyText.equals("Alt") ||
+            keyText.equals("Meta") || keyText.equals("Caps Lock") ||
+            keyText.startsWith("Unknown")) return null;
+
+        // Build modifier prefix for hotkey combos
+        if (ctrl || alt || meta) {
+            StringBuilder combo = new StringBuilder();
+            if (ctrl)  combo.append("ctrl+");
+            if (alt)   combo.append("alt+");
+            if (meta)  combo.append("cmd+");
+            if (shift) combo.append("shift+");
+            String keyName = com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.getKeyText(code).toLowerCase();
+            return "[COMBO:" + combo + keyName + "]";
+        }
+
+        // Special keys
+        switch (code) {
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_ENTER:     return "\n";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_TAB:       return "\t";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_ESCAPE:    return "[ESC]";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_BACKSPACE: return "[BACKSPACE]";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_DELETE:    return "[DELETE]";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_UP:        return "[UP]";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_DOWN:      return "[DOWN]";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_LEFT:      return "[LEFT]";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_RIGHT:     return "[RIGHT]";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_HOME:      return "[HOME]";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_END:       return "[END]";
+            case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_SPACE:     return " ";
+            default:
+                // Regular printable char
+                char ch = com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.getKeyText(code).charAt(0);
+                if (shift && Character.isLetter(ch)) return String.valueOf(Character.toUpperCase(ch));
+                if (Character.isLetterOrDigit(ch) || ch == ' ') return String.valueOf(ch);
+                // Punctuation
+                String text = com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.getKeyText(code);
+                if (text.length() == 1) return text;
+                return null;
+        }
+    }
+
+    private void buildSpecialKeyGrid(JTextArea target) {
+        String[][] keys = {
+            {"Enter","\n"}, {"Tab","\t"}, {"Esc","[ESC]"},
+            {"Up","[UP]"}, {"Down","[DOWN]"}, {"Left","[LEFT]"}, {"Right","[RIGHT]"},
+            {"Del","[DEL]"}, {"Home","[HOME]"}, {"End","[END]"}
+        };
+        JPanel grid = new JPanel(new java.awt.GridLayout(0,4,3,3));
+        grid.setBackground(BG); grid.setAlignmentX(LEFT_ALIGNMENT);
+        grid.setBorder(new EmptyBorder(4,4,4,4));
+        for (String[] k : keys) {
+            JButton btn = new JButton(k[0]);
+            btn.setFont(new Font("SansSerif",Font.PLAIN,10));
+            btn.setBackground(new Color(40,40,58)); btn.setForeground(new Color(180,220,255));
+            btn.setBorder(BorderFactory.createLineBorder(new Color(60,80,120),1));
+            btn.setFocusPainted(false); btn.setOpaque(true);
+            final String insertVal = k[1];
+            btn.addActionListener(e -> {
+                // For special non-text keys, append a placeholder tag
+                String toInsert = insertVal;
+                if (!insertVal.equals("\n") && !insertVal.equals("\t")) {
+                    toInsert = insertVal; // keep [ESC] [UP] etc as tags
+                }
+                target.insert(toInsert, target.getCaretPosition());
+                setStrField("typeText", target.getText());
+            });
+            grid.add(btn);
+        }
+        content.add(grid);
+    }
+
+    private void buildComboGrid(String[][] combos, JTextField field) {
+        JPanel grid = new JPanel(new java.awt.GridLayout(0,3,3,3));
+        grid.setBackground(BG); grid.setAlignmentX(LEFT_ALIGNMENT);
+        grid.setBorder(new EmptyBorder(4,4,4,4));
+        for (String[] k : combos) {
+            JButton btn = new JButton(k[0]);
+            btn.setFont(new Font("SansSerif",Font.PLAIN,10));
+            btn.setBackground(new Color(40,40,58)); btn.setForeground(new Color(180,220,255));
+            btn.setBorder(BorderFactory.createLineBorder(new Color(60,80,120),1));
+            btn.setFocusPainted(false); btn.setOpaque(true);
+            btn.addActionListener(e -> {
+                field.setText(k[1]);
+                setStrField("hotkeyCombo", k[1]);
+            });
+            grid.add(btn);
+        }
+        content.add(grid);
     }
 
     // =========================================================

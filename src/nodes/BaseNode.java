@@ -117,6 +117,6 @@ public abstract class BaseNode {
 
     // ── Node types enum ──────────────────────────────────────
     public enum NodeType {
-        WATCH_ZONE, CLICK, SIMPLE_CLICK, CONDITION, LOOP, WAIT, STOP
+        WATCH_ZONE, CLICK, SIMPLE_CLICK, CONDITION, LOOP, WAIT, STOP, KEYBOARD
     }
 }

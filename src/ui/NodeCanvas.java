@@ -32,8 +32,8 @@ public class NodeCanvas extends JPanel {
     private String     startNodeId        = null;
 
     // ── Ghost drag (from palette) ─────────────────────────────
-    private BaseNode.NodeType ghostType   = null;  // type being dragged in
-    private Point             ghostPoint  = null;  // current mouse pos (screen)
+    private BaseNode.NodeType ghostType   = null;
+    private Point             ghostPoint  = null;
 
     // ── Pan / Zoom ────────────────────────────────────────────
     double  zoom         = 1.0;
@@ -56,32 +56,29 @@ public class NodeCanvas extends JPanel {
     private static final Color SUCCESS_GLOW = new Color(40,220,100);
     private static final Color FAILED_GLOW  = new Color(220,60,60);
 
-    // ── Port appearance helpers ───────────────────────────────
     private static Color portColor(String portName) {
         String n = portName.toLowerCase();
-        // Check negative cases FIRST before positive (e.g. "Not Found" before "Found")
-        if (n.contains("not found") || n.contains("not found")) return new Color(220,60,60);
-        if (n.equals("stopped") || n.contains("fail"))           return new Color(220,60,60);
-        if (n.contains("timeout"))                               return new Color(220,180,40);
+        if (n.contains("not found")) return new Color(220,60,60);
+        if (n.equals("stopped") || n.contains("fail")) return new Color(220,60,60);
+        if (n.contains("timeout"))                     return new Color(220,180,40);
         if (n.contains("found") || n.contains("done") || n.equals("loop")) return new Color(60,200,80);
-        if (n.equals("stop"))                                    return new Color(220,60,60);
+        if (n.equals("stop"))                          return new Color(220,60,60);
         return new Color(100,140,220);
     }
 
     private static String portIcon(String portName) {
         String n = portName.toLowerCase();
-        if (n.contains("not found"))                             return "✗";
-        if (n.equals("stopped") || n.contains("fail"))           return "✗";
-        if (n.equals("stop"))                                    return "✗";
-        if (n.contains("timeout"))                               return "⊙";
-        if (n.contains("found") || n.contains("done") || n.equals("loop")) return "✓";
-        return "→";
+        if (n.contains("not found"))                             return "\u2717";
+        if (n.equals("stopped") || n.contains("fail"))           return "\u2717";
+        if (n.equals("stop"))                                    return "\u2717";
+        if (n.contains("timeout"))                               return "\u2299";
+        if (n.contains("found") || n.contains("done") || n.equals("loop")) return "\u2713";
+        return "\u2192";
     }
 
-    // ── Arrow class ───────────────────────────────────────────
     public static class Arrow {
         public String fromNodeId, fromPort, toNodeId, label;
-        public int    bendOffset = 40; // pixels down from src before turning
+        public int    bendOffset = 40;
         public boolean selected  = false;
         Arrow(String from, String port, String to, String label) {
             fromNodeId=from; fromPort=port; toNodeId=to; this.label=label;
@@ -106,7 +103,6 @@ public class NodeCanvas extends JPanel {
             public void keyPressed(KeyEvent e){
                 if ((e.getKeyCode()==KeyEvent.VK_DELETE||e.getKeyCode()==KeyEvent.VK_BACK_SPACE)
                         && selectedArrow!=null) {
-                    // Remove the arrow and clear its port target
                     BaseNode from = nodes.get(selectedArrow.fromNodeId);
                     if (from!=null) from.setPortTarget(selectedArrow.fromPort, null);
                     arrows.remove(selectedArrow);
@@ -120,30 +116,22 @@ public class NodeCanvas extends JPanel {
         });
     }
 
-    // ── Public API ────────────────────────────────────────────
     public void setOnNodeSelected(Consumer<BaseNode> cb)    { onNodeSelected    = cb; }
     public void setStartNode(String id) { startNodeId = id; repaint(); }
     public String getStartNodeId()      { return startNodeId; }
     public void setOnNodeDoubleClick(Consumer<BaseNode> cb) { onNodeDoubleClick = cb; }
     public void setOnCanvasChanged(Runnable cb)             { onCanvasChanged   = cb; }
 
-    /** Called by NodePalette when user starts dragging a node type */
     public void startGhostDrag(BaseNode.NodeType type) {
         ghostType  = type;
         ghostPoint = MouseInfo.getPointerInfo().getLocation();
         repaint();
     }
 
-    /** Called by NodePalette on mouse move during drag */
-    public void updateGhostDrag(Point screenPoint) {
-        ghostPoint = screenPoint;
-        repaint();
-    }
+    public void updateGhostDrag(Point screenPoint) { ghostPoint = screenPoint; repaint(); }
 
-    /** Called by NodePalette on mouse release — drop the node at exact screen position */
     public BaseNode finishGhostDrag(Point screenPoint) {
         if (ghostType == null) return null;
-        // Convert screen coords to canvas coords
         Point compPt;
         try {
             Point loc = getLocationOnScreen();
@@ -154,11 +142,8 @@ public class NodeCanvas extends JPanel {
             compPt = new Point(100 + (int)(Math.random()*300), 80 + (int)(Math.random()*200));
         }
         BaseNode node = NodeFactory.create(ghostType, Math.max(10, compPt.x - 90), Math.max(10, compPt.y - 37));
-        ghostType  = null;
-        ghostPoint = null;
-        addNode(node);
-        selectNode(node);
-        repaint();
+        ghostType = null; ghostPoint = null;
+        addNode(node); selectNode(node); repaint();
         return node;
     }
 
@@ -185,8 +170,8 @@ public class NodeCanvas extends JPanel {
     public BaseNode getSelectedNode()       { return selectedNode; }
     public void refreshNode(BaseNode node)  { repaint(); }
 
-    public void zoomIn()  { zoom = Math.min(3.0, zoom * 1.2); repaint(); }
-    public void zoomOut() { zoom = Math.max(0.3, zoom / 1.2); repaint(); }
+    public void zoomIn()   { zoom = Math.min(3.0, zoom * 1.2); repaint(); }
+    public void zoomOut()  { zoom = Math.max(0.3, zoom / 1.2); repaint(); }
     public void zoomReset(){ zoom = 1.0; panX=0; panY=0; repaint(); }
 
     public void fitToScreen() {
@@ -203,63 +188,33 @@ public class NodeCanvas extends JPanel {
         repaint();
     }
 
-    // ── Painting ─────────────────────────────────────────────
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         Graphics2D g2=(Graphics2D)g.create();
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,    RenderingHints.VALUE_ANTIALIAS_ON);
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-
         drawGrid(g2);
         g2.translate(panX,panY);
         g2.scale(zoom,zoom);
-
         drawArrows(g2);
         if (connectFrom!=null&&connectMouse!=null) drawLiveArrow(g2);
         for (BaseNode node:nodes.values()) drawNode(g2,node);
-
-        // Draw ghost
         if (ghostType!=null&&ghostPoint!=null) drawGhost(g2);
-
         g2.dispose();
     }
 
     private static String nodeTypeBadge(BaseNode.NodeType type) {
         switch(type) {
-            case WATCH_ZONE:   return "◎";
-            case CLICK:        return "↗";
-            case SIMPLE_CLICK: return "⊕";
+            case WATCH_ZONE:   return "\u25ce";
+            case CLICK:        return "\u2197";
+            case SIMPLE_CLICK: return "\u2295";
             case CONDITION:    return "?";
-            case LOOP:         return "↺";
-            case WAIT:         return "⏱";
-            case STOP:         return "■";
-            default:           return "•";
-        }
-    }
-
-    // Use ImageLabel trick for emoji on macOS — fallback to unicode if needed
-    private static void drawNodeIcon(Graphics2D g2, BaseNode.NodeType type, int x, int y) {
-        // Try rendering via JLabel for proper emoji support
-        String emoji = nodeTypeBadge(type);
-        g2.setFont(new Font("Apple Color Emoji", Font.PLAIN, 13));
-        if (g2.getFont().canDisplayUpTo(emoji) == -1) {
-            g2.drawString(emoji, x, y);
-        } else {
-            // Fallback: use SansSerif symbol
-            g2.setFont(new Font("SansSerif", Font.BOLD, 12));
-            String fb;
-            switch(type) {
-                case WATCH_ZONE:   fb="👁"; break;
-                case CLICK:        fb="↗"; break;
-                case SIMPLE_CLICK: fb="⚡"; break;
-                case CONDITION:    fb="◇"; break;
-                case LOOP:         fb="↺"; break;
-                case WAIT:         fb="⏸"; break;
-                case STOP:         fb="◼"; break;
-                default:           fb="•"; break;
-            }
-            g2.drawString(fb, x, y);
+            case LOOP:         return "\u21ba";
+            case WAIT:         return "\u23f1";
+            case STOP:         return "\u25a0";
+            case KEYBOARD:     return "\u2328";
+            default:           return "\u2022";
         }
     }
 
@@ -272,41 +227,34 @@ public class NodeCanvas extends JPanel {
     }
 
     private void drawGhost(Graphics2D g2) {
-        // Convert screen ghost point to canvas coords
         Point screen = ghostPoint;
-        int cx = (int)((screen.x - getLocationOnScreen().x - panX)/zoom) - 90;
-        int cy = (int)((screen.y - getLocationOnScreen().y - panY)/zoom) - 37;
+        int cx,cy;
+        try {
+            Point loc = getLocationOnScreen();
+            cx = (int)((screen.x - loc.x - panX)/zoom) - 90;
+            cy = (int)((screen.y - loc.y - panY)/zoom) - 37;
+        } catch(Exception e) { return; }
         Color nc = NodeFactory.color(ghostType);
         Composite old = g2.getComposite();
         g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.6f));
-        g2.setColor(nc.darker());
-        g2.fillRoundRect(cx,cy,180,75,12,12);
-        g2.setColor(nc.brighter());
-        g2.setStroke(new BasicStroke(1.5f));
+        g2.setColor(nc.darker()); g2.fillRoundRect(cx,cy,180,75,12,12);
+        g2.setColor(nc.brighter()); g2.setStroke(new BasicStroke(1.5f));
         g2.drawRoundRect(cx,cy,180,75,12,12);
-        g2.setColor(Color.WHITE);
-        // Badge circle (same as drawn nodes)
-        Color ic = NodeFactory.color(ghostType).brighter();
-        g2.setColor(ic);
-        g2.fillOval(cx+7, cy+8, 22, 22);
+        // Badge circle
+        g2.setColor(nc.brighter()); g2.fillOval(cx+7, cy+7, 22, 22);
         g2.setColor(Color.WHITE);
         String badge = nodeTypeBadge(ghostType);
-        Font badgeFont = new Font("Dialog", Font.BOLD, 12);
-        g2.setFont(badgeFont);
-        FontMetrics bfm = g2.getFontMetrics();
-        int bx = cx+7 + (22 - bfm.stringWidth(badge))/2;
-        int by = cy+8 + (22 - bfm.getHeight())/2 + bfm.getAscent();
-        g2.drawString(badge, bx, by);
-        g2.setFont(new Font("SansSerif",Font.BOLD,11));
-        g2.setColor(Color.WHITE);
-        g2.drawString(NodeFactory.displayName(ghostType), cx+30, cy+26);
+        Font bf = new Font("Dialog", Font.BOLD, 13);
+        g2.setFont(bf); FontMetrics bfm = g2.getFontMetrics();
+        g2.drawString(badge, cx+7+(22-bfm.stringWidth(badge))/2, cy+7+(22-bfm.getHeight())/2+bfm.getAscent());
+        g2.setFont(new Font("SansSerif",Font.BOLD,11)); g2.setColor(Color.WHITE);
+        g2.drawString(NodeFactory.displayName(ghostType), cx+34, cy+22);
         g2.setComposite(old);
     }
 
     private void drawNode(Graphics2D g2, BaseNode node) {
         int x=node.x, y=node.y, w=node.width, h=node.height;
 
-        // Run-state glow
         RunState state=node.runState;
         if (state==RunState.RUNNING) {
             long pulse=(System.currentTimeMillis()/300)%2;
@@ -320,59 +268,39 @@ public class NodeCanvas extends JPanel {
             g2.setColor(FAILED_GLOW); g2.setStroke(new BasicStroke(3));
             g2.drawRoundRect(x-2,y-2,w+4,h+4,14,14);
         }
-
-        // Selection glow
         if (node==selectedNode) {
             g2.setColor(SELECT_GLOW); g2.setStroke(new BasicStroke(2.5f));
             g2.drawRoundRect(x-3,y-3,w+6,h+6,14,14);
         }
-
-        // Shadow
-        g2.setColor(new Color(0,0,0,60));
-        g2.fillRoundRect(x+3,y+3,w,h,12,12);
-
-        // Body
+        g2.setColor(new Color(0,0,0,60)); g2.fillRoundRect(x+3,y+3,w,h,12,12);
         GradientPaint gp=new GradientPaint(x,y,node.nodeColor().brighter(),x,y+h,node.nodeColor().darker());
         g2.setPaint(gp); g2.setStroke(new BasicStroke(1));
         g2.fillRoundRect(x,y,w,h,12,12);
-
-        // Border
         g2.setColor(node.nodeColor().brighter().brighter()); g2.setStroke(new BasicStroke(1.2f));
         g2.drawRoundRect(x,y,w,h,12,12);
-
-        // Disabled overlay
         if (!node.branchEnabled) { g2.setColor(new Color(0,0,0,120)); g2.fillRoundRect(x,y,w,h,12,12); }
 
-        // Icon badge — colored circle with centered symbol
+        // Badge circle — use unicode so it renders well
         Color ic = node.nodeColor().brighter();
-        g2.setColor(ic);
-        g2.fillOval(x+7, y+8, 22, 22);
+        g2.setColor(ic); g2.fillOval(x+7, y+7, 22, 22);
         g2.setColor(Color.WHITE);
         String badge = nodeTypeBadge(node.type);
-        Font badgeFont = new Font("Dialog", Font.BOLD, 12);
-        g2.setFont(badgeFont);
-        FontMetrics bfm = g2.getFontMetrics();
-        int bx = x+7 + (22 - bfm.stringWidth(badge))/2;
-        int by = y+8 + (22 - bfm.getHeight())/2 + bfm.getAscent();
-        g2.drawString(badge, bx, by);
+        Font bf = new Font("Dialog", Font.BOLD, 13);
+        g2.setFont(bf); FontMetrics bfm = g2.getFontMetrics();
+        g2.drawString(badge, x+7+(22-bfm.stringWidth(badge))/2, y+7+(22-bfm.getHeight())/2+bfm.getAscent());
 
-        // Label
         g2.setFont(new Font("SansSerif",Font.BOLD,11)); g2.setColor(Color.WHITE);
-        String lbl = node.label.length()>16 ? node.label.substring(0,14)+"…" : node.label;
+        String lbl = node.label.length()>16 ? node.label.substring(0,14)+"\u2026" : node.label;
         g2.drawString(lbl, x+34, y+20);
-
-        // Type subtitle
         g2.setFont(new Font("SansSerif",Font.PLAIN,9)); g2.setColor(new Color(255,255,255,140));
         g2.drawString(node.type.name().replace("_"," "), x+34, y+32);
 
-        // Start node badge — green ▶ in top-right corner
         if (node.id.equals(startNodeId)) {
             g2.setColor(new Color(40,220,80));
             g2.setFont(new Font("SansSerif",Font.BOLD,11));
-            g2.drawString("▶", x+w-18, y+14);
+            g2.drawString("\u25b6", x+w-18, y+14);
         }
 
-        // ── Output ports with icon + colored dot ─────────────
         int numPorts = node.outputs.size();
         if (numPorts>0) {
             int spacing = w / (numPorts+1);
@@ -382,23 +310,15 @@ public class NodeCanvas extends JPanel {
                 int dotY = y+h;
                 Color pc = portColor(port.name);
                 String icon = portIcon(port.name);
-
-                // Port icon above dot
                 g2.setFont(new Font("SansSerif",Font.BOLD,10));
                 g2.setColor(pc);
                 FontMetrics fm = g2.getFontMetrics();
-                int iw = fm.stringWidth(icon);
-                g2.drawString(icon, px-iw/2, dotY-10);
-
-                // Colored dot
-                g2.setColor(pc);
-                g2.fillOval(px-5, dotY-5, 10, 10);
+                g2.drawString(icon, px-fm.stringWidth(icon)/2, dotY-10);
+                g2.setColor(pc); g2.fillOval(px-5, dotY-5, 10, 10);
                 g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1));
                 g2.drawOval(px-5, dotY-5, 10, 10);
             }
         }
-
-        // Input dot (top center) — white/blue
         Point inp = node.inputAnchor();
         g2.setColor(new Color(160,200,255));
         g2.fillOval(inp.x-5,inp.y-5,10,10);
@@ -419,42 +339,27 @@ public class NodeCanvas extends JPanel {
     private void drawLiveArrow(Graphics2D g2) {
         Point src=connectFrom.outputAnchor(connectPort);
         int mx=(int)((connectMouse.x-panX)/zoom), my=(int)((connectMouse.y-panY)/zoom);
-        // Simple straight live preview
         g2.setColor(ARROW_HOVER);
         g2.setStroke(new BasicStroke(1.5f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));
         g2.drawLine(src.x, src.y, mx, my);
         drawArrowHead(g2, new Point(mx,my), ARROW_HOVER);
     }
 
-    /** Draw orthogonal (right-angle) routed arrow with draggable bend */
     private void drawOrthogonalArrow(Graphics2D g2, Arrow a, Point src, Point dst, Color color) {
-        int bendY = src.y + a.bendOffset; // horizontal segment Y
-
-        // 3-segment path: down → across → down to target
+        int bendY = src.y + a.bendOffset;
         int[] xs = { src.x, src.x, dst.x, dst.x };
         int[] ys = { src.y, bendY,  bendY,  dst.y };
-
         g2.setColor(color);
-        boolean sel = a.selected;
-        g2.setStroke(new BasicStroke(sel?2.5f:2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-
-        // Draw 3 segments
+        g2.setStroke(new BasicStroke(a.selected?2.5f:2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         for (int i=0; i<3; i++) g2.drawLine(xs[i],ys[i],xs[i+1],ys[i+1]);
-
-        // Arrowhead at dst
         drawArrowHead(g2, dst, color);
-
-        // Bend handle — small circle on the horizontal segment, shown when selected
-        if (sel) {
+        if (a.selected) {
             int hx = (src.x + dst.x)/2;
             g2.setColor(new Color(255,220,60));
             g2.fillOval(hx-5, bendY-5, 10, 10);
-            g2.setColor(Color.WHITE);
-            g2.setStroke(new BasicStroke(1f));
+            g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1f));
             g2.drawOval(hx-5, bendY-5, 10, 10);
         }
-
-        // Label on horizontal segment
         if (a.label!=null&&!a.label.isEmpty()) {
             int lx=(src.x+dst.x)/2, ly=bendY-8;
             g2.setFont(new Font("SansSerif",Font.BOLD,10));
@@ -467,24 +372,18 @@ public class NodeCanvas extends JPanel {
     }
 
     private void drawArrowHead(Graphics2D g2, Point tip, Color color) {
-        g2.setColor(color);
-        int sz=8;
+        g2.setColor(color); int sz=8;
         g2.fillPolygon(new int[]{tip.x,tip.x-sz/2,tip.x+sz/2},
                        new int[]{tip.y,tip.y-sz,tip.y-sz},3);
     }
 
-    /** Check if point p is near the orthogonal arrow segments */
     private boolean arrowHitTest(Arrow a, Point p) {
         BaseNode from=nodes.get(a.fromNodeId), to=nodes.get(a.toNodeId);
         if (from==null||to==null) return false;
         Point src=from.outputAnchor(a.fromPort), dst=to.inputAnchor();
-        int bendY = src.y + a.bendOffset;
-        int tol = 6;
-        // Seg 1: src.x, src.y → src.x, bendY
+        int bendY = src.y + a.bendOffset, tol = 6;
         if (nearSegment(p, src.x,src.y, src.x,bendY, tol)) return true;
-        // Seg 2: src.x, bendY → dst.x, bendY
         if (nearSegment(p, src.x,bendY, dst.x,bendY, tol)) return true;
-        // Seg 3: dst.x, bendY → dst.x, dst.y
         if (nearSegment(p, dst.x,bendY, dst.x,dst.y, tol)) return true;
         return false;
     }
@@ -493,23 +392,18 @@ public class NodeCanvas extends JPanel {
         int minX=Math.min(x1,x2)-tol, maxX=Math.max(x1,x2)+tol;
         int minY=Math.min(y1,y2)-tol, maxY=Math.max(y1,y2)+tol;
         if (p.x<minX||p.x>maxX||p.y<minY||p.y>maxY) return false;
-        // Distance from point to line segment
         double dx=x2-x1, dy=y2-y1, len2=dx*dx+dy*dy;
         if (len2==0) return p.distance(x1,y1)<tol;
-        double t=((p.x-x1)*dx+(p.y-y1)*dy)/len2;
-        t=Math.max(0,Math.min(1,t));
-        double nx=x1+t*dx, ny=y1+t*dy;
-        return p.distance(nx,ny)<tol;
+        double t=Math.max(0,Math.min(1,((p.x-x1)*dx+(p.y-y1)*dy)/len2));
+        return p.distance(x1+t*dx, y1+t*dy)<tol;
     }
 
-    // ── Mouse handlers ────────────────────────────────────────
     private void handleMousePressed(MouseEvent e) {
         Point cv=screenToCanvas(e.getPoint());
         requestFocusInWindow();
         if (SwingUtilities.isMiddleMouseButton(e)||(e.isAltDown()&&SwingUtilities.isLeftMouseButton(e))) {
             panning=true; panDragStartX=e.getX()-panX; panDragStartY=e.getY()-panY; return;
         }
-        // Check port dots
         for (BaseNode node:nodes.values()) {
             for (NodePort port:node.outputs) {
                 Point anchor=node.outputAnchor(port.name);
@@ -518,7 +412,6 @@ public class NodeCanvas extends JPanel {
                 }
             }
         }
-        // Check bend handle drag (selected arrow horizontal segment midpoint)
         if (selectedArrow!=null) {
             BaseNode from=nodes.get(selectedArrow.fromNodeId);
             BaseNode to=nodes.get(selectedArrow.toNodeId);
@@ -526,23 +419,17 @@ public class NodeCanvas extends JPanel {
                 Point src=from.outputAnchor(selectedArrow.fromPort);
                 int bendY=(int)((src.y+selectedArrow.bendOffset)*zoom)+panY;
                 int hx=(int)(((src.x+to.inputAnchor().x)/2.0)*zoom)+panX;
-                Point screenHandle=new Point(hx,bendY);
-                if (e.getPoint().distance(screenHandle)<12) {
-                    bendDragArrow=selectedArrow;
-                    bendDragStartY=e.getY();
-                    bendDragOrigOffset=selectedArrow.bendOffset;
-                    return;
+                if (e.getPoint().distance(new Point(hx,bendY))<12) {
+                    bendDragArrow=selectedArrow; bendDragStartY=e.getY();
+                    bendDragOrigOffset=selectedArrow.bendOffset; return;
                 }
             }
         }
-        // Check node hit
         BaseNode hit=nodeAt(cv);
         if (hit!=null) {
-            // Deselect arrow
             if (selectedArrow!=null) { selectedArrow.selected=false; selectedArrow=null; }
             dragNode=hit; dragOffX=cv.x-hit.x; dragOffY=cv.y-hit.y; selectNode(hit);
         } else {
-            // Check arrow hit
             Arrow hitArrow=null;
             for (Arrow a:arrows) { if (arrowHitTest(a,cv)) { hitArrow=a; break; } }
             if (hitArrow!=null) {
@@ -568,8 +455,7 @@ public class NodeCanvas extends JPanel {
                 arrows.removeIf(a->a.fromNodeId.equals(connectFrom.id)&&a.fromPort.equals(connectPort));
                 NodePort port=null;
                 for (NodePort p:connectFrom.outputs) if(p.name.equals(connectPort)){port=p;break;}
-                String lbl=port!=null?port.displayLabel():connectPort;
-                arrows.add(new Arrow(connectFrom.id,connectPort,target.id,lbl));
+                arrows.add(new Arrow(connectFrom.id,connectPort,target.id,port!=null?port.displayLabel():connectPort));
                 notifyChanged();
             }
             connectFrom=null; connectPort=null; connectMouse=null; repaint(); return;
@@ -580,8 +466,7 @@ public class NodeCanvas extends JPanel {
     private void handleMouseDragged(MouseEvent e) {
         if (panning) { panX=e.getX()-panDragStartX; panY=e.getY()-panDragStartY; repaint(); return; }
         if (bendDragArrow!=null) {
-            int dy=(int)((e.getY()-bendDragStartY)/zoom);
-            bendDragArrow.bendOffset=Math.max(10, bendDragOrigOffset+dy);
+            bendDragArrow.bendOffset=Math.max(10, bendDragOrigOffset+(int)((e.getY()-bendDragStartY)/zoom));
             repaint(); return;
         }
         if (connectFrom!=null) { connectMouse=e.getPoint(); repaint(); return; }
@@ -611,11 +496,8 @@ public class NodeCanvas extends JPanel {
             addMenuItem(menu,"Edit settings",()->{ if(onNodeDoubleClick!=null) onNodeDoubleClick.accept(hit); });
             addMenuItem(menu,hit.branchEnabled?"Disable node":"Enable node",()->{hit.branchEnabled=!hit.branchEnabled;repaint();notifyChanged();});
             addMenuSep(menu);
-            String startTxt = hit.id.equals(startNodeId) ? "★ Start node (click to unset)" : "▶ Set as start node";
-            addMenuItem(menu, startTxt, ()->{
-                startNodeId = hit.id.equals(startNodeId) ? null : hit.id;
-                repaint(); notifyChanged();
-            });
+            String startTxt = hit.id.equals(startNodeId) ? "\u2605 Start node (click to unset)" : "\u25b6 Set as start node";
+            addMenuItem(menu, startTxt, ()->{ startNodeId=hit.id.equals(startNodeId)?null:hit.id; repaint(); notifyChanged(); });
             addMenuSep(menu);
             addMenuItem(menu,"Delete node",()->removeNode(hit));
         } else {
@@ -634,63 +516,46 @@ public class NodeCanvas extends JPanel {
 
     private void addMenuHeader(JPopupMenu m, String text) {
         JLabel hdr=new JLabel("  "+text);
-        hdr.setForeground(new Color(140,140,170));
-        hdr.setFont(new Font("SansSerif",Font.BOLD,10));
-        hdr.setBorder(BorderFactory.createEmptyBorder(6,4,4,4));
-        m.add(hdr);
-        addMenuSep(m);
+        hdr.setForeground(new Color(140,140,170)); hdr.setFont(new Font("SansSerif",Font.BOLD,10));
+        hdr.setBorder(BorderFactory.createEmptyBorder(6,4,4,4)); m.add(hdr); addMenuSep(m);
     }
 
     private void addMenuItem(JPopupMenu m,String text,Runnable action) {
         JMenuItem item=new JMenuItem(text);
-        item.setBackground(new Color(30,30,42));
-        item.setForeground(new Color(210,210,220));
-        item.setFont(new Font("SansSerif",Font.PLAIN,12));
-        item.setBorderPainted(false);
-        item.setBorder(BorderFactory.createEmptyBorder(5,12,5,12));
-        item.setOpaque(true);
-        // Override selection color — no green
+        item.setBackground(new Color(30,30,42)); item.setForeground(new Color(210,210,220));
+        item.setFont(new Font("SansSerif",Font.PLAIN,12)); item.setBorderPainted(false);
+        item.setBorder(BorderFactory.createEmptyBorder(5,12,5,12)); item.setOpaque(true);
         item.setUI(new javax.swing.plaf.basic.BasicMenuItemUI(){
             protected void paintBackground(Graphics g,JMenuItem mi,Color bgColor){
-                g.setColor(mi.isArmed()||mi.isSelected()
-                    ? new Color(50,50,68) : new Color(30,30,42));
+                g.setColor(mi.isArmed()||mi.isSelected()?new Color(50,50,68):new Color(30,30,42));
                 g.fillRect(0,0,mi.getWidth(),mi.getHeight());
             }
         });
-        item.addActionListener(e->action.run());
-        m.add(item);
+        item.addActionListener(e->action.run()); m.add(item);
     }
 
     private void addMenuItemColored(JPopupMenu m,String text,Color accent,Runnable action) {
         JMenuItem item=new JMenuItem(text);
-        item.setBackground(new Color(30,30,42));
-        item.setForeground(new Color(210,210,220));
-        item.setFont(new Font("SansSerif",Font.PLAIN,12));
-        item.setBorderPainted(false);
-        item.setBorder(BorderFactory.createEmptyBorder(5,12,5,12));
-        item.setOpaque(true);
+        item.setBackground(new Color(30,30,42)); item.setForeground(new Color(210,210,220));
+        item.setFont(new Font("SansSerif",Font.PLAIN,12)); item.setBorderPainted(false);
+        item.setBorder(BorderFactory.createEmptyBorder(5,12,5,12)); item.setOpaque(true);
         item.setIcon(new javax.swing.Icon(){
-            public void paintIcon(Component c,Graphics g,int x,int y){
-                g.setColor(accent); g.fillRoundRect(x,y+1,4,getIconHeight()-2,3,3);
-            }
+            public void paintIcon(Component c,Graphics g,int x,int y){ g.setColor(accent); g.fillRoundRect(x,y+1,4,getIconHeight()-2,3,3); }
             public int getIconWidth(){ return 8; }
             public int getIconHeight(){ return 14; }
         });
         item.setUI(new javax.swing.plaf.basic.BasicMenuItemUI(){
             protected void paintBackground(Graphics g,JMenuItem mi,Color bgColor){
-                g.setColor(mi.isArmed()||mi.isSelected()
-                    ? new Color(50,50,68) : new Color(30,30,42));
+                g.setColor(mi.isArmed()||mi.isSelected()?new Color(50,50,68):new Color(30,30,42));
                 g.fillRect(0,0,mi.getWidth(),mi.getHeight());
             }
         });
-        item.addActionListener(e->action.run());
-        m.add(item);
+        item.addActionListener(e->action.run()); m.add(item);
     }
+
     private void addMenuSep(JPopupMenu m) {
         JSeparator s=new JSeparator();
-        s.setForeground(new Color(55,55,68));
-        s.setBackground(new Color(30,30,42));
-        m.add(s);
+        s.setForeground(new Color(55,55,68)); s.setBackground(new Color(30,30,42)); m.add(s);
     }
 
     private BaseNode nodeAt(Point cv) {

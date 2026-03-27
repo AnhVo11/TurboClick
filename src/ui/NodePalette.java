@@ -13,18 +13,16 @@ public class NodePalette extends JPanel {
     private Runnable onSmartPinClicked;
     private NodeCanvas targetCanvas;
 
-    // Same icons as NodeFactory palette
-    // Only show most-used nodes in palette — rest available via right-click
     private static final BaseNode.NodeType[] PALETTE_TYPES = {
         BaseNode.NodeType.WATCH_ZONE,
         BaseNode.NodeType.SIMPLE_CLICK,
+        BaseNode.NodeType.KEYBOARD,
         BaseNode.NodeType.WAIT,
         BaseNode.NodeType.STOP
     };
-    private static final String[] ICONS = { "◎","⊕","⏱","■" };
-    private static final String[] NAMES = { "Watch Zone","Simple Click","Wait","Stop" };
+    private static final String[] ICONS = { "\u25ce","\u2295","\u2328","\u23f1","\u25a0" };
+    private static final String[] NAMES = { "Watch Zone","Simple Click","Keyboard","Wait","Stop" };
 
-    // Ghost drag state
     private BaseNode.NodeType draggingType = null;
 
     public NodePalette() {
@@ -41,7 +39,7 @@ public class NodePalette extends JPanel {
 
         for (int i=0;i<PALETTE_TYPES.length;i++) add(buildCard(PALETTE_TYPES[i],ICONS[i],NAMES[i]));
 
-        JLabel hint=new JLabel("Click or drag to canvas  ·  Right-click canvas for menu");
+        JLabel hint=new JLabel("Click or drag to canvas  \u00b7  Right-click canvas for menu");
         hint.setForeground(new Color(60,60,80)); hint.setFont(new Font("SansSerif",Font.PLAIN,9));
         hint.setBorder(BorderFactory.createEmptyBorder(0,8,0,0));
         add(hint);
@@ -56,32 +54,26 @@ public class NodePalette extends JPanel {
 
         JPanel card=new JPanel() {
             boolean hovered=false;
-            boolean pressing=false;
             {
                 setPreferredSize(new Dimension(105,44));
                 setOpaque(false);
                 setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-                setToolTipText("Add "+name+" — drag to position");
+                setToolTipText("Add "+name+" \u2014 drag to position");
 
                 addMouseListener(new MouseAdapter(){
                     public void mouseEntered(MouseEvent e){ hovered=true; repaint(); }
                     public void mouseExited(MouseEvent e) { hovered=false; repaint(); }
                     public void mousePressed(MouseEvent e){
-                        pressing=true;
                         draggingType=type;
                         if (targetCanvas!=null) targetCanvas.startGhostDrag(type);
                     }
                     public void mouseReleased(MouseEvent e){
-                        pressing=false;
                         if (draggingType!=null) {
-                            // Convert release point to screen
                             Point screenPt=e.getLocationOnScreen();
                             if (targetCanvas!=null && isOverCanvas(screenPt)) {
-                                BaseNode dropped=targetCanvas.finishGhostDrag(screenPt);
-                                // notify
+                                targetCanvas.finishGhostDrag(screenPt);
                                 if (onNodeDropped!=null) onNodeDropped.accept(type,screenPt);
                             } else {
-                                // Click (not drag) or dropped outside → add at random
                                 if (targetCanvas!=null) targetCanvas.cancelGhostDrag();
                                 if (onNodeDropped!=null) onNodeDropped.accept(type,new Point(0,0));
                             }
@@ -124,23 +116,5 @@ public class NodePalette extends JPanel {
             }
         };
         return card;
-    }
-
-    private JButton buildSmartPinBtn() {
-        JButton b=new JButton("⊕  Smart Pin");
-        b.setFont(new Font("SansSerif",Font.BOLD,11));
-        b.setBackground(new Color(28,28,40)); b.setForeground(new Color(80,140,255)); b.setOpaque(true);
-        b.setFocusPainted(false);
-        b.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(80,140,255),1),
-            BorderFactory.createEmptyBorder(4,10,4,10)));
-        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        b.setPreferredSize(new Dimension(110,30));
-        b.addMouseListener(new MouseAdapter(){
-            public void mouseEntered(MouseEvent e){ b.setBackground(new Color(40,50,70)); }
-            public void mouseExited(MouseEvent e) { b.setBackground(new Color(28,28,40)); }
-        });
-        b.addActionListener(e->{ if(onSmartPinClicked!=null) onSmartPinClicked.run(); });
-        return b;
     }
 }
