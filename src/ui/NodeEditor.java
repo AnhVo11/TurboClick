@@ -50,7 +50,6 @@ public class NodeEditor extends JPanel {
         scroll.setBackground(BG);
         scroll.setBorder(null);
         scroll.getViewport().setBackground(BG);
-        // Make scrollbar translucent and auto-hide
         JScrollBar vsb = scroll.getVerticalScrollBar();
         vsb.setOpaque(false);
         vsb.setPreferredSize(new Dimension(6, 0));
@@ -68,7 +67,6 @@ public class NodeEditor extends JPanel {
         });
         scroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        // Fade scrollbar after 1.5s of no scroll
         javax.swing.Timer[] fadeTimer = {null};
         vsb.addAdjustmentListener(ae -> {
             vsb.setPreferredSize(new Dimension(6,0));
@@ -130,6 +128,8 @@ public class NodeEditor extends JPanel {
             case WAIT:         buildWait();         break;
             case STOP:         buildStop();         break;
             case KEYBOARD:     buildKeyboard();     break;
+            case IMAGE:        buildImage();        break;
+            case WATCH_CASE:   buildWatchCase();    break;
         }
 
         if (!currentNode.outputs.isEmpty()) {
@@ -148,6 +148,174 @@ public class NodeEditor extends JPanel {
     }
 
     // =========================================================
+    //  SHARED CAPTURE SECTION
+    // =========================================================
+    private void buildCaptureSection(String templateField, String zoneField) {
+        templatePreview = new JLabel("No image captured");
+        templatePreview.setForeground(TEXT_DIM);
+        templatePreview.setFont(new Font("SansSerif",Font.ITALIC,10));
+        templatePreview.setHorizontalAlignment(SwingConstants.CENTER);
+        templatePreview.setPreferredSize(new Dimension(220,60));
+        templatePreview.setMaximumSize(new Dimension(240,60));
+        templatePreview.setAlignmentX(LEFT_ALIGNMENT);
+        templatePreview.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(BORDER_C), BorderFactory.createEmptyBorder(4,4,4,4)));
+        templatePreview.setBackground(new Color(20,20,30)); templatePreview.setOpaque(true);
+        try {
+            Object existing = getObjField(templateField);
+            if (existing instanceof java.awt.image.BufferedImage) updatePreview((java.awt.image.BufferedImage)existing);
+        } catch(Exception ignored){}
+        JPanel previewRow = new JPanel(new FlowLayout(FlowLayout.LEFT,8,4));
+        previewRow.setBackground(BG); previewRow.setAlignmentX(LEFT_ALIGNMENT);
+        previewRow.add(templatePreview);
+        content.add(previewRow);
+
+        JButton captureBtn  = editorBtn("Capture", new Color(50,100,170));
+        JButton openFileBtn = editorBtn("Open File", new Color(60,100,60));
+        JPanel capRow = new JPanel(new FlowLayout(FlowLayout.LEFT,6,2));
+        capRow.setBackground(BG); capRow.setAlignmentX(LEFT_ALIGNMENT);
+        capRow.add(captureBtn); capRow.add(openFileBtn);
+        content.add(capRow);
+
+        captureBtn.addActionListener(e -> startCaptureToField(templateField, zoneField));
+        openFileBtn.addActionListener(e -> {
+            JFileChooser fc = new JFileChooser();
+            fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Images","png","jpg","jpeg","bmp","gif"));
+            if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+                try {
+                    java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(fc.getSelectedFile());
+                    if (img != null) {
+                        setObjField(templateField, img);
+                        updatePreview(img);
+                    }
+                } catch(Exception ex){ ex.printStackTrace(); }
+            }
+        });
+
+        templatePreview.setTransferHandler(new TransferHandler(){
+            public boolean canImport(TransferSupport ts){
+                return ts.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.javaFileListFlavor);
+            }
+            public boolean importData(TransferSupport ts){
+                try {
+                    java.util.List<java.io.File> files=(java.util.List<java.io.File>)
+                        ts.getTransferable().getTransferData(java.awt.datatransfer.DataFlavor.javaFileListFlavor);
+                    if (!files.isEmpty()) {
+                        java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(files.get(0));
+                        if (img!=null){ setObjField(templateField, img); updatePreview(img); return true; }
+                    }
+                } catch(Exception ignored){}
+                return false;
+            }
+        });
+        templatePreview.setToolTipText("Drag & drop an image here");
+
+        if (zoneField != null) {
+            addSection("Watch Zone");
+            sameAsCaptureCb = new JCheckBox("Use same area as captured template");
+            sameAsCaptureCb.setBackground(BG); sameAsCaptureCb.setForeground(TEXT);
+            sameAsCaptureCb.setFont(new Font("SansSerif",Font.PLAIN,11));
+            sameAsCaptureCb.setBorder(new EmptyBorder(2,8,2,0));
+            sameAsCaptureCb.setAlignmentX(LEFT_ALIGNMENT);
+            sameAsCaptureCb.setSelected(getBoolField("sameAsCapture",false));
+            content.add(sameAsCaptureCb);
+            zoneStatusLabel = new JLabel();
+            zoneStatusLabel.setFont(new Font("SansSerif",Font.ITALIC,10));
+            zoneStatusLabel.setAlignmentX(LEFT_ALIGNMENT);
+            zoneStatusLabel.setBorder(new EmptyBorder(0,8,0,0));
+            refreshZoneStatus(); content.add(zoneStatusLabel);
+            JButton setZoneBtn = editorBtn("Set Watch Zone", new Color(50,130,80));
+            setZoneBtn.setAlignmentX(LEFT_ALIGNMENT);
+            JPanel zoneRow = new JPanel(new FlowLayout(FlowLayout.LEFT,8,2));
+            zoneRow.setBackground(BG); zoneRow.setAlignmentX(LEFT_ALIGNMENT);
+            zoneRow.add(setZoneBtn); content.add(zoneRow);
+            sameAsCaptureCb.addActionListener(e -> {
+                boolean same = sameAsCaptureCb.isSelected();
+                setBoolField("sameAsCapture",same); setZoneBtn.setEnabled(!same);
+                if (same) applySameAsCapture(); refreshZoneStatus();
+            });
+            setZoneBtn.setEnabled(!getBoolField("sameAsCapture",false));
+            setZoneBtn.addActionListener(e -> startCapture(false));
+        }
+    }
+
+    private void startCaptureToField(String templateField, String zoneField) {
+        Window win = SwingUtilities.getWindowAncestor(this);
+        if (win!=null) win.setVisible(false);
+        Timer delay = new Timer(300, ev -> {
+            showOverlayToField(templateField, zoneField, win);
+        });
+        delay.setRepeats(false); delay.start();
+    }
+
+    private void showOverlayToField(String templateField, String zoneField, Window parentWindow) {
+        JWindow overlay = new JWindow();
+        overlay.setAlwaysOnTop(true);
+        overlay.setBackground(new Color(0,0,0,0));
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        overlay.setBounds(0,0,screen.width,screen.height);
+        int[] drag={0,0,0,0}; boolean[] dragging={false};
+        JPanel glass = new JPanel(){
+            protected void paintComponent(Graphics g){
+                Graphics2D g2=(Graphics2D)g;
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(0,0,0,80)); g2.fillRect(0,0,getWidth(),getHeight());
+                String msg="Drag to capture image   [ESC = cancel]";
+                g2.setFont(new Font("SansSerif",Font.BOLD,16));
+                FontMetrics fm=g2.getFontMetrics(); int tw=fm.stringWidth(msg);
+                g2.setColor(new Color(0,0,0,160));
+                g2.fillRoundRect((getWidth()-tw)/2-12,18,tw+24,34,10,10);
+                g2.setColor(new Color(100,180,255)); g2.drawString(msg,(getWidth()-tw)/2,40);
+                if (dragging[0]){
+                    int rx=Math.min(drag[0],drag[2]),ry=Math.min(drag[1],drag[3]);
+                    int rw=Math.abs(drag[2]-drag[0]),rh=Math.abs(drag[3]-drag[1]);
+                    Composite old=g2.getComposite();
+                    g2.setComposite(AlphaComposite.Clear); g2.fillRect(rx,ry,rw,rh);
+                    g2.setComposite(old);
+                    g2.setColor(new Color(100,180,255)); g2.setStroke(new BasicStroke(2)); g2.drawRect(rx,ry,rw,rh);
+                    g2.setFont(new Font("Monospaced",Font.BOLD,11));
+                    g2.drawString(rw+"x"+rh,rx+4,ry>20?ry-4:ry+rh+16);
+                }
+            }
+        };
+        glass.setOpaque(false); glass.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+        glass.setFocusable(true);
+        glass.addKeyListener(new KeyAdapter(){
+            public void keyPressed(KeyEvent e){
+                if (e.getKeyCode()==KeyEvent.VK_ESCAPE){
+                    overlay.dispose();
+                    if (parentWindow!=null) SwingUtilities.invokeLater(()->{ parentWindow.setVisible(true); parentWindow.toFront(); });
+                }
+            }
+        });
+        glass.addMouseListener(new MouseAdapter(){
+            public void mousePressed(MouseEvent e){ drag[0]=e.getX(); drag[1]=e.getY(); dragging[0]=true; glass.requestFocusInWindow(); }
+            public void mouseReleased(MouseEvent e){
+                dragging[0]=false; overlay.dispose();
+                int rx=Math.min(drag[0],drag[2]),ry=Math.min(drag[1],drag[3]);
+                int rw=Math.abs(drag[2]-drag[0]),rh=Math.abs(drag[3]-drag[1]);
+                if (rw>4&&rh>4){
+                    try {
+                        java.awt.Rectangle rect=new java.awt.Rectangle(rx,ry,rw,rh);
+                        java.awt.image.BufferedImage img=new java.awt.Robot().createScreenCapture(rect);
+                        setObjField(templateField, img);
+                        if (zoneField!=null){ setObjField(zoneField, rect); if(getBoolField("sameAsCapture",false)) applySameAsCapture(); }
+                        else { setObjField("captureRect", rect); }
+                        SwingUtilities.invokeLater(()->{ updatePreview(img); });
+                    } catch(Exception ex){ ex.printStackTrace(); }
+                }
+                if (parentWindow!=null) SwingUtilities.invokeLater(()->{ parentWindow.setVisible(true); parentWindow.toFront(); });
+                Timer t=new Timer(150, ev->rebuild()); t.setRepeats(false); t.start();
+            }
+        });
+        glass.addMouseMotionListener(new MouseMotionAdapter(){
+            public void mouseDragged(MouseEvent e){ drag[2]=e.getX(); drag[3]=e.getY(); glass.repaint(); }
+        });
+        overlay.setContentPane(glass); overlay.setVisible(true);
+        SwingUtilities.invokeLater(glass::requestFocusInWindow);
+    }
+
+    // =========================================================
     //  WATCH ZONE
     // =========================================================
     private void buildWatchZone() {
@@ -155,68 +323,7 @@ public class NodeEditor extends JPanel {
         addLabeledField("Name", getStrField("imageName","Unnamed Image"), val -> setStrField("imageName", val));
 
         addSection("Capture Template");
-
-        templatePreview = new JLabel("No image captured");
-        templatePreview.setForeground(TEXT_DIM);
-        templatePreview.setFont(new Font("SansSerif", Font.ITALIC, 10));
-        templatePreview.setHorizontalAlignment(SwingConstants.CENTER);
-        templatePreview.setPreferredSize(new Dimension(220, 60));
-        templatePreview.setMaximumSize(new Dimension(240, 60));
-        templatePreview.setAlignmentX(LEFT_ALIGNMENT);
-        templatePreview.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(BORDER_C), BorderFactory.createEmptyBorder(4,4,4,4)));
-        templatePreview.setBackground(new Color(20,20,30));
-        templatePreview.setOpaque(true);
-
-        BufferedImage existing = (BufferedImage) getObjField("template");
-        if (existing != null) updatePreview(existing);
-
-        JPanel previewRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
-        previewRow.setBackground(BG); previewRow.setAlignmentX(LEFT_ALIGNMENT);
-        previewRow.add(templatePreview);
-        content.add(previewRow);
-
-        JButton captureBtn = editorBtn("Capture Template", new Color(50,100,170));
-        captureBtn.setAlignmentX(LEFT_ALIGNMENT);
-        JPanel capRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-        capRow.setBackground(BG); capRow.setAlignmentX(LEFT_ALIGNMENT);
-        capRow.add(captureBtn);
-        content.add(capRow);
-        captureBtn.addActionListener(e -> startCapture(true));
-
-        addSection("Watch Zone");
-
-        sameAsCaptureCb = new JCheckBox("Use same area as captured template");
-        sameAsCaptureCb.setBackground(BG); sameAsCaptureCb.setForeground(TEXT);
-        sameAsCaptureCb.setFont(new Font("SansSerif", Font.PLAIN, 11));
-        sameAsCaptureCb.setBorder(new EmptyBorder(2,8,2,0));
-        sameAsCaptureCb.setAlignmentX(LEFT_ALIGNMENT);
-        sameAsCaptureCb.setSelected(getBoolField("sameAsCapture", false));
-        content.add(sameAsCaptureCb);
-
-        zoneStatusLabel = new JLabel();
-        zoneStatusLabel.setFont(new Font("SansSerif", Font.ITALIC, 10));
-        zoneStatusLabel.setAlignmentX(LEFT_ALIGNMENT);
-        zoneStatusLabel.setBorder(new EmptyBorder(0,8,0,0));
-        refreshZoneStatus();
-        content.add(zoneStatusLabel);
-
-        JButton setZoneBtn = editorBtn("Set Watch Zone", new Color(50,130,80));
-        setZoneBtn.setAlignmentX(LEFT_ALIGNMENT);
-        JPanel zoneRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-        zoneRow.setBackground(BG); zoneRow.setAlignmentX(LEFT_ALIGNMENT);
-        zoneRow.add(setZoneBtn);
-        content.add(zoneRow);
-
-        sameAsCaptureCb.addActionListener(e -> {
-            boolean same = sameAsCaptureCb.isSelected();
-            setBoolField("sameAsCapture", same);
-            setZoneBtn.setEnabled(!same);
-            if (same) applySameAsCapture();
-            refreshZoneStatus();
-        });
-        setZoneBtn.setEnabled(!getBoolField("sameAsCapture", false));
-        setZoneBtn.addActionListener(e -> startCapture(false));
+        buildCaptureSection("template", "watchZone");
 
         addSection("Match Settings");
         addLabeledSpinner("Match % threshold",     getIntField("matchThreshold",85),    10, 100,   val -> setIntField("matchThreshold", val));
@@ -418,7 +525,6 @@ public class NodeEditor extends JPanel {
         addSection("Click Points");
         addInfo("Empty = click at cursor position");
 
-        // Pin ring color picker
         JPanel ringRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
         ringRow.setBackground(BG); ringRow.setAlignmentX(LEFT_ALIGNMENT);
         JLabel ringLbl = new JLabel("Pin ring color:");
@@ -431,15 +537,9 @@ public class NodeEditor extends JPanel {
         ringBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         ringBtn.addActionListener(e -> {
             Color[] presets = {
-                new Color(255,210,0),   // Yellow
-                new Color(255,80,80),   // Red
-                new Color(80,200,80),   // Green
-                new Color(80,140,255),  // Blue
-                new Color(255,140,0),   // Orange
-                new Color(200,80,255),  // Purple
-                new Color(0,220,220),   // Cyan
-                Color.WHITE,
-                new Color(180,180,180)  // Gray
+                new Color(255,210,0), new Color(255,80,80), new Color(80,200,80),
+                new Color(80,140,255), new Color(255,140,0), new Color(200,80,255),
+                new Color(0,220,220), Color.WHITE, new Color(180,180,180)
             };
             JDialog picker = new JDialog((java.awt.Frame)null, "Pin Ring Color", true);
             picker.setUndecorated(true);
@@ -462,23 +562,19 @@ public class NodeEditor extends JPanel {
         ringRow.add(ringLbl); ringRow.add(ringBtn);
         content.add(ringRow);
 
-        // Smart Pin button — pick points by clicking on screen
         JButton smartPinBtn = editorBtn("⊕  Smart Pin — pick points on screen", new Color(50,100,180));
         smartPinBtn.setAlignmentX(LEFT_ALIGNMENT);
         JPanel pinRow = new JPanel(new FlowLayout(FlowLayout.LEFT,8,2));
         pinRow.setBackground(BG); pinRow.setAlignmentX(LEFT_ALIGNMENT);
         pinRow.add(smartPinBtn);
         content.add(pinRow);
-        // Will be wired after tm is created
         final DefaultTableModel[] tmRef = {null};
 
-        // Columns: # X Y Clicks Sub-s(ms) After-s(ms) — store ms internally, display as seconds
         String[] cols = {"#","X","Y","Clicks","Sub-delay","After-delay"};
         DefaultTableModel tm = new DefaultTableModel(cols, 0) {
-            public boolean isCellEditable(int r, int c) { return c==1||c==2||c==3; } // X,Y,Clicks editable; delays via popup
+            public boolean isCellEditable(int r, int c) { return c==1||c==2||c==3; }
             public Object getValueAt(int r, int c) {
                 Object v = super.getValueAt(r,c);
-                // Display columns 4,5 as seconds with 3 decimal places
                 if ((c==4||c==5) && v instanceof Number) {
                     long ms = ((Number)v).longValue();
                     return String.format("%.3f s", ms/1000.0);
@@ -487,8 +583,6 @@ public class NodeEditor extends JPanel {
             }
         };
         java.util.List<int[]> pts = getPointsField();
-        // Disable listener while populating to avoid premature sync
-        javax.swing.event.TableModelListener[] listeners = new javax.swing.event.TableModelListener[0];
         for (int i = 0; i < pts.size(); i++) {
             int[] p = pts.get(i);
             tm.addRow(new Object[]{i+1, p[0], p[1], p[2], (long)p[3], (long)p[4]});
@@ -505,7 +599,6 @@ public class NodeEditor extends JPanel {
         int[] cw = {18,44,44,38,65,65};
         for (int i=0;i<cw.length;i++) tbl.getColumnModel().getColumn(i).setPreferredWidth(cw[i]);
 
-        // Simple renderer for delay columns — shows value in blue tint
         javax.swing.table.TableCellRenderer delayRenderer = new javax.swing.table.DefaultTableCellRenderer() {
             public java.awt.Component getTableCellRendererComponent(JTable t, Object val,
                     boolean sel, boolean foc, int row, int col) {
@@ -521,7 +614,6 @@ public class NodeEditor extends JPanel {
         tm.addTableModelListener(e -> syncPointsToNode(tm));
         tmRef[0] = tm;
 
-        // Single-click on Sub-s or After-s column → open interval picker popup
         tbl.addMouseListener(new MouseAdapter(){
             public void mouseClicked(MouseEvent e){
                 if (e.getClickCount()<1) return;
@@ -531,24 +623,16 @@ public class NodeEditor extends JPanel {
                 Object cur = tm.getValueAt(row, col);
                 long currentMs = 100;
                 try {
-                    // stored as Long internally
                     if (cur instanceof Long) currentMs = (Long)cur;
                     else if (cur instanceof Number) currentMs = ((Number)cur).longValue();
-                    else { // displayed as "0.100 s" string
-                        String s = cur.toString().replace(" s","").trim();
-                        currentMs = (long)(Double.parseDouble(s)*1000);
-                    }
+                    else { String s = cur.toString().replace(" s","").trim(); currentMs = (long)(Double.parseDouble(s)*1000); }
                 } catch(Exception ignored){}
                 String colName = col==4 ? "Sub-click delay" : "Delay after click";
                 long result = showIntervalPicker(colName, currentMs);
-                if (result >= 0) {
-                    tm.setValueAt(result, row, col);
-                    syncPointsToNode(tm);
-                }
+                if (result >= 0) { tm.setValueAt(result, row, col); syncPointsToNode(tm); }
             }
         });
 
-        // Sync stores ms as Long — override syncPointsToNode to handle Long
         smartPinBtn.addActionListener(e -> startSmartPinSession(tmRef[0]));
 
         JScrollPane tblScroll = new JScrollPane(tbl);
@@ -558,24 +642,18 @@ public class NodeEditor extends JPanel {
         tblScroll.getViewport().setBackground(new Color(32,32,44));
         tblScroll.setAlignmentX(LEFT_ALIGNMENT);
         tblScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        // Translucent thin scrollbar
         JScrollBar vsb = tblScroll.getVerticalScrollBar();
-        vsb.setPreferredSize(new Dimension(5,0));
-        vsb.setOpaque(false);
+        vsb.setPreferredSize(new Dimension(5,0)); vsb.setOpaque(false);
         vsb.setUI(new javax.swing.plaf.basic.BasicScrollBarUI(){
             protected void configureScrollBarColors(){ thumbColor=new Color(100,100,160,160); trackColor=new Color(0,0,0,0); }
             protected JButton createDecreaseButton(int o){ JButton b=new JButton(); b.setPreferredSize(new Dimension(0,0)); b.setBorderPainted(false); return b; }
             protected JButton createIncreaseButton(int o){ JButton b=new JButton(); b.setPreferredSize(new Dimension(0,0)); b.setBorderPainted(false); return b; }
         });
-        // Fade scrollbar after idle
         javax.swing.Timer[] tblFade = {null};
         vsb.addAdjustmentListener(ae -> {
             vsb.setPreferredSize(new Dimension(5,0));
             if (tblFade[0]!=null) tblFade[0].stop();
-            tblFade[0] = new javax.swing.Timer(1500, ev -> {
-                vsb.setPreferredSize(new Dimension(0,0));
-                tblScroll.revalidate();
-            });
+            tblFade[0] = new javax.swing.Timer(1500, ev -> { vsb.setPreferredSize(new Dimension(0,0)); tblScroll.revalidate(); });
             tblFade[0].setRepeats(false); tblFade[0].start();
             tblScroll.revalidate();
         });
@@ -596,11 +674,7 @@ public class NodeEditor extends JPanel {
         });
         remBtn.addActionListener(e -> {
             int row = tbl.getSelectedRow();
-            if (row>=0) {
-                tm.removeRow(row);
-                for (int i=0;i<tm.getRowCount();i++) tm.setValueAt(i+1,i,0);
-                syncPointsToNode(tm);
-            }
+            if (row>=0) { tm.removeRow(row); for (int i=0;i<tm.getRowCount();i++) tm.setValueAt(i+1,i,0); syncPointsToNode(tm); }
         });
         clrBtn.addActionListener(e -> { tm.setRowCount(0); syncPointsToNode(tm); });
         tblBtns.add(addBtn); tblBtns.add(remBtn); tblBtns.add(clrBtn);
@@ -655,9 +729,7 @@ public class NodeEditor extends JPanel {
         addLabeledSpinner("Repeat delay (ms)", getIntField("repeatDelayMs",100),0, 10000, val -> setIntField("repeatDelayMs", val));
 
         if (currentMode == 0) {
-            // ── Type Text mode ────────────────────────────────
             addSection("Text to Type");
-
             JTextArea textArea = new JTextArea(getStrField("typeText",""), 3, 20);
             textArea.setFont(new Font("Monospaced",Font.PLAIN,12));
             textArea.setBackground(new Color(35,35,50)); textArea.setForeground(new Color(220,220,230));
@@ -677,18 +749,14 @@ public class NodeEditor extends JPanel {
             tsp.setBorder(null);
             content.add(Box.createVerticalStrut(4));
             content.add(tsp);
-
             addLabeledSpinner("Char delay (ms)", getIntField("charDelayMs",50), 0, 1000, val -> setIntField("charDelayMs", val));
-
             addSection("Special Keys");
             addInfo("Click to append to text");
             buildSpecialKeyGrid(textArea);
 
         } else if (currentMode == 1) {
-            // ── Hotkey Combo mode ─────────────────────────────
             addSection("Hotkey Combination");
             addInfo("e.g.  ctrl+c   ctrl+shift+t   alt+f4");
-
             JTextField hotkeyField = new JTextField(getStrField("hotkeyCombo",""), 15);
             hotkeyField.setFont(new Font("Monospaced",Font.PLAIN,13));
             hotkeyField.setBackground(new Color(35,35,50)); hotkeyField.setForeground(new Color(220,220,230));
@@ -703,7 +771,6 @@ public class NodeEditor extends JPanel {
             hfRow.setBackground(BG); hfRow.setAlignmentX(LEFT_ALIGNMENT);
             hfRow.add(hotkeyField);
             content.add(hfRow);
-
             addSection("Quick Combos");
             String[][] combos = {
                 {"Ctrl+C","ctrl+c"}, {"Ctrl+V","ctrl+v"}, {"Ctrl+X","ctrl+x"},
@@ -714,7 +781,6 @@ public class NodeEditor extends JPanel {
             buildComboGrid(combos, hotkeyField);
 
         } else if (currentMode == 2) {
-            // ── Single Key mode ───────────────────────────────
             addSection("Key to Press");
             String[] keyNames = {
                 "ENTER","ESCAPE","TAB","SPACE","BACKSPACE","DELETE",
@@ -726,11 +792,8 @@ public class NodeEditor extends JPanel {
                 val -> setStrField("singleKey", keyNames[Math.max(0,val)]));
 
         } else {
-            // ── Record mode ───────────────────────────────────
             addSection("Record Keystrokes");
             addInfo("Click Record, type on keyboard, click Stop");
-
-            // Show currently recorded text
             String recorded = getStrField("typeText","");
             JLabel recPreview = new JLabel(recorded.isEmpty() ? "(nothing recorded yet)" : recorded);
             recPreview.setFont(new Font("Monospaced",Font.PLAIN,11));
@@ -739,59 +802,45 @@ public class NodeEditor extends JPanel {
             recPreview.setAlignmentX(LEFT_ALIGNMENT);
             content.add(recPreview);
 
-            // Record / Stop buttons
             JPanel recBtns = new JPanel(new FlowLayout(FlowLayout.LEFT,6,4));
             recBtns.setBackground(BG); recBtns.setAlignmentX(LEFT_ALIGNMENT);
-            JButton recBtn  = editorBtn("⏺  Record", new Color(200,40,40));
-            JButton stopRecBtn = editorBtn("⏹  Stop", new Color(60,60,80));
+            JButton recBtn  = editorBtn("\u23fa  Record", new Color(200,40,40));
+            JButton stopRecBtn = editorBtn("\u23f9  Stop", new Color(60,60,80));
             JButton clearRecBtn = editorBtn("Clear", new Color(60,60,80));
             stopRecBtn.setEnabled(false);
 
-            // StringBuilder to accumulate recorded keys
             StringBuilder recorded_sb = new StringBuilder(recorded);
             boolean[] isRecording = {false};
-
-            // Use jNativeHook to capture global keystrokes while recording
             com.github.kwhat.jnativehook.keyboard.NativeKeyListener[] recListener = {null};
 
             Runnable stopRec = () -> {
                 isRecording[0] = false;
-                recBtn.setEnabled(true);
-                stopRecBtn.setEnabled(false);
-                recBtn.setText("⏺  Record");
+                recBtn.setEnabled(true); stopRecBtn.setEnabled(false);
+                recBtn.setText("\u23fa  Record");
                 if (recListener[0] != null) {
                     try { com.github.kwhat.jnativehook.GlobalScreen.removeNativeKeyListener(recListener[0]); }
                     catch (Exception ignored) {}
                     recListener[0] = null;
                 }
                 setStrField("typeText", recorded_sb.toString());
-                // Switch mode to Type Text so it actually uses the recorded text
                 setIntField("mode", 0);
                 SwingUtilities.invokeLater(this::rebuild);
             };
 
             recBtn.addActionListener(e -> {
                 isRecording[0] = true;
-                recBtn.setEnabled(false);
-                stopRecBtn.setEnabled(true);
-                recBtn.setText("⏺  Recording...");
+                recBtn.setEnabled(false); stopRecBtn.setEnabled(true);
+                recBtn.setText("\u23fa  Recording...");
                 recorded_sb.setLength(0);
                 recPreview.setText("(recording...)");
                 recPreview.setForeground(new Color(255,80,80));
-
                 recListener[0] = new com.github.kwhat.jnativehook.keyboard.NativeKeyListener() {
                     public void nativeKeyPressed(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent ev) {
                         if (!isRecording[0]) return;
-                        int code = ev.getKeyCode();
-                        String keyText = com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.getKeyText(code);
-                        // Map to bracket tag or char
-                        String append = mapNativeKey(code, ev.getModifiers());
+                        String append = mapNativeKey(ev.getKeyCode(), ev.getModifiers());
                         if (append != null) {
                             recorded_sb.append(append);
-                            SwingUtilities.invokeLater(() -> {
-                                recPreview.setText(recorded_sb.toString());
-                                recPreview.setForeground(new Color(180,220,255));
-                            });
+                            SwingUtilities.invokeLater(() -> { recPreview.setText(recorded_sb.toString()); recPreview.setForeground(new Color(180,220,255)); });
                         }
                     }
                     public void nativeKeyReleased(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent ev) {}
@@ -803,44 +852,30 @@ public class NodeEditor extends JPanel {
 
             stopRecBtn.addActionListener(e -> stopRec.run());
             clearRecBtn.addActionListener(e -> {
-                recorded_sb.setLength(0);
-                setStrField("typeText","");
-                recPreview.setText("(nothing recorded yet)");
-                recPreview.setForeground(new Color(80,80,100));
+                recorded_sb.setLength(0); setStrField("typeText","");
+                recPreview.setText("(nothing recorded yet)"); recPreview.setForeground(new Color(80,80,100));
             });
-
             recBtns.add(recBtn); recBtns.add(stopRecBtn); recBtns.add(clearRecBtn);
             content.add(recBtns);
-
             addLabeledSpinner("Char delay (ms)", getIntField("charDelayMs",50), 0, 1000, val -> setIntField("charDelayMs", val));
         }
     }
 
-    /** Map a NativeKeyEvent code to a string to insert into typeText */
     private String mapNativeKey(int code, int mods) {
         boolean ctrl  = (mods & com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.CTRL_MASK)  != 0;
         boolean alt   = (mods & com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.ALT_MASK)   != 0;
         boolean shift = (mods & com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.SHIFT_MASK) != 0;
         boolean meta  = (mods & com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.META_MASK)  != 0;
-
-        // Modifier-only keys — skip by checking key text
         String keyText = com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.getKeyText(code);
         if (keyText.equals("Shift") || keyText.equals("Ctrl") || keyText.equals("Alt") ||
-            keyText.equals("Meta") || keyText.equals("Caps Lock") ||
-            keyText.startsWith("Unknown")) return null;
-
-        // Build modifier prefix for hotkey combos
+            keyText.equals("Meta") || keyText.equals("Caps Lock") || keyText.startsWith("Unknown")) return null;
         if (ctrl || alt || meta) {
             StringBuilder combo = new StringBuilder();
-            if (ctrl)  combo.append("ctrl+");
-            if (alt)   combo.append("alt+");
-            if (meta)  combo.append("cmd+");
-            if (shift) combo.append("shift+");
+            if (ctrl) combo.append("ctrl+"); if (alt) combo.append("alt+");
+            if (meta) combo.append("cmd+"); if (shift) combo.append("shift+");
             String keyName = com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.getKeyText(code).toLowerCase();
             return "[COMBO:" + combo + keyName + "]";
         }
-
-        // Special keys
         switch (code) {
             case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_ENTER:     return "\n";
             case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_TAB:       return "\t";
@@ -855,11 +890,9 @@ public class NodeEditor extends JPanel {
             case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_END:       return "[END]";
             case com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_SPACE:     return " ";
             default:
-                // Regular printable char
                 char ch = com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.getKeyText(code).charAt(0);
                 if (shift && Character.isLetter(ch)) return String.valueOf(Character.toUpperCase(ch));
                 if (Character.isLetterOrDigit(ch) || ch == ' ') return String.valueOf(ch);
-                // Punctuation
                 String text = com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.getKeyText(code);
                 if (text.length() == 1) return text;
                 return null;
@@ -882,15 +915,7 @@ public class NodeEditor extends JPanel {
             btn.setBorder(BorderFactory.createLineBorder(new Color(60,80,120),1));
             btn.setFocusPainted(false); btn.setOpaque(true);
             final String insertVal = k[1];
-            btn.addActionListener(e -> {
-                // For special non-text keys, append a placeholder tag
-                String toInsert = insertVal;
-                if (!insertVal.equals("\n") && !insertVal.equals("\t")) {
-                    toInsert = insertVal; // keep [ESC] [UP] etc as tags
-                }
-                target.insert(toInsert, target.getCaretPosition());
-                setStrField("typeText", target.getText());
-            });
+            btn.addActionListener(e -> { target.insert(insertVal, target.getCaretPosition()); setStrField("typeText", target.getText()); });
             grid.add(btn);
         }
         content.add(grid);
@@ -906,10 +931,7 @@ public class NodeEditor extends JPanel {
             btn.setBackground(new Color(40,40,58)); btn.setForeground(new Color(180,220,255));
             btn.setBorder(BorderFactory.createLineBorder(new Color(60,80,120),1));
             btn.setFocusPainted(false); btn.setOpaque(true);
-            btn.addActionListener(e -> {
-                field.setText(k[1]);
-                setStrField("hotkeyCombo", k[1]);
-            });
+            btn.addActionListener(e -> { field.setText(k[1]); setStrField("hotkeyCombo", k[1]); });
             grid.add(btn);
         }
         content.add(grid);
@@ -938,29 +960,25 @@ public class NodeEditor extends JPanel {
     }
 
     // =========================================================
-    //  SMART PIN SESSION — identical UI to SimpleClickPanel
+    //  SMART PIN SESSION
     // =========================================================
     private void startSmartPinSession(DefaultTableModel tm) {
         Window win = SwingUtilities.getWindowAncestor(this);
         if (win != null) win.setVisible(false);
 
-        // Capture node reference NOW — currentNode may change later
         final nodes.BaseNode sessionNode = currentNode;
         Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
         java.util.List<EditorPin> pins = new java.util.ArrayList<>();
 
-        // Restore existing points as pins
         for (int i = 0; i < tm.getRowCount(); i++) {
             try {
                 int px = Integer.parseInt(tm.getValueAt(i,1).toString());
                 int py = Integer.parseInt(tm.getValueAt(i,2).toString());
                 EditorPin ep = new EditorPin(px, py, i, tm);
-                pins.add(ep);
-                ep.show();
+                pins.add(ep); ep.show();
             } catch (Exception ignored) {}
         }
 
-        // ── Floating bar ──────────────────────────────────────
         JWindow smartBar = new JWindow();
         smartBar.setAlwaysOnTop(true);
         smartBar.setBackground(new Color(0,0,0,0));
@@ -970,19 +988,12 @@ public class NodeEditor extends JPanel {
             protected void paintComponent(Graphics g) {
                 Graphics2D g2=(Graphics2D)g;
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(new Color(15,15,22,240));
-                g2.fillRoundRect(0,0,getWidth(),getHeight(),18,18);
-                g2.setColor(new Color(80,140,255,200));
-                g2.fillRoundRect(0,0,getWidth(),3,4,4);
+                g2.setColor(new Color(15,15,22,240)); g2.fillRoundRect(0,0,getWidth(),getHeight(),18,18);
+                g2.setColor(new Color(80,140,255,200)); g2.fillRoundRect(0,0,getWidth(),3,4,4);
             }
         };
         bar.setOpaque(false);
         bar.setLayout(new FlowLayout(FlowLayout.CENTER,10,7));
-
-        JLabel dragHandle = new JLabel("⠿");
-        dragHandle.setFont(new Font("SansSerif",Font.PLAIN,16));
-        dragHandle.setForeground(new Color(100,100,130));
-        dragHandle.setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
 
         JLabel titleLbl = new JLabel("Smart Pin");
         titleLbl.setFont(new Font("SansSerif",Font.BOLD,12));
@@ -992,26 +1003,22 @@ public class NodeEditor extends JPanel {
         pinCountLbl.setFont(new Font("SansSerif",Font.PLAIN,11));
         pinCountLbl.setForeground(new Color(120,120,150));
 
-        JLabel coordsLbl = new JLabel("X: ─── Y: ───");
+        JLabel coordsLbl = new JLabel("X: \u2500\u2500\u2500 Y: \u2500\u2500\u2500");
         coordsLbl.setFont(new Font("Monospaced",Font.BOLD,12));
         coordsLbl.setForeground(new Color(80,220,120));
 
         JButton addPinBtn = smartBarBtn("+ Pin", new Color(50,100,180));
-        JButton doneBtn   = smartBarBtn("✓ Done", new Color(60,60,80));
+        JButton doneBtn   = smartBarBtn("\u2713 Done", new Color(60,60,80));
 
         JLabel s1=new JLabel("|"); s1.setForeground(new Color(60,60,80));
         JLabel s2=new JLabel("|"); s2.setForeground(new Color(60,60,80));
         JLabel s3=new JLabel("|"); s3.setForeground(new Color(60,60,80));
 
-        bar.add(dragHandle); bar.add(titleLbl);
-        bar.add(s1); bar.add(pinCountLbl);
-        bar.add(s2); bar.add(coordsLbl);
-        bar.add(s3); bar.add(addPinBtn); bar.add(doneBtn);
+        bar.add(titleLbl); bar.add(s1); bar.add(pinCountLbl);
+        bar.add(s2); bar.add(coordsLbl); bar.add(s3); bar.add(addPinBtn); bar.add(doneBtn);
 
         int[] off={0,0};
-        bar.addMouseListener(new MouseAdapter(){
-            public void mousePressed(MouseEvent e){ off[0]=e.getX(); off[1]=e.getY(); }
-        });
+        bar.addMouseListener(new MouseAdapter(){ public void mousePressed(MouseEvent e){ off[0]=e.getX(); off[1]=e.getY(); }});
         bar.addMouseMotionListener(new MouseMotionAdapter(){
             public void mouseDragged(MouseEvent e){
                 Point loc=smartBar.getLocationOnScreen();
@@ -1024,7 +1031,6 @@ public class NodeEditor extends JPanel {
         smartBar.setLocation(screen.width/2-smartBar.getWidth()/2, 18);
         smartBar.setVisible(true);
 
-        // Live coords + track last mouse pos
         int[] lastMouse = {0,0};
         javax.swing.Timer coordTimer = new javax.swing.Timer(50, e -> {
             Point p = MouseInfo.getPointerInfo().getLocation();
@@ -1035,27 +1041,19 @@ public class NodeEditor extends JPanel {
 
         Runnable finish = () -> {
             coordTimer.stop();
-            // Build points list from table and save directly to captured node
             java.util.List<int[]> pts = buildPointsList(tm);
-            try { getField(sessionNode, "points").set(sessionNode, pts); }
-            catch (Exception e) { e.printStackTrace(); }
+            try { getField(sessionNode, "points").set(sessionNode, pts); } catch (Exception e) { e.printStackTrace(); }
             for (EditorPin ep : pins) ep.dispose();
             try { smartBar.dispose(); } catch(Exception ignored) {}
             if (win!=null) SwingUtilities.invokeLater(() -> { win.setVisible(true); win.toFront(); });
-            javax.swing.Timer t = new javax.swing.Timer(150, e -> {
-                currentNode = sessionNode; // ensure we rebuild the right node
-                rebuild();
-            });
+            javax.swing.Timer t = new javax.swing.Timer(150, e -> { currentNode = sessionNode; rebuild(); });
             t.setRepeats(false); t.start();
         };
 
         doneBtn.addActionListener(ae -> finish.run());
-
         addPinBtn.addActionListener(ae -> {
-            // Spawn at center of screen so user can always see and drag it
             Dimension scr = Toolkit.getDefaultToolkit().getScreenSize();
-            int px = scr.width/2;
-            int py = scr.height/2;
+            int px = scr.width/2, py = scr.height/2;
             int row = tm.getRowCount();
             tm.addRow(new Object[]{row+1, px, py, 1, 100, 100});
             syncPointsToNode(tm);
@@ -1066,28 +1064,21 @@ public class NodeEditor extends JPanel {
                 for (int ri=0;ri<pins.size();ri++) pins.get(ri).rowIndex=ri;
                 pinCountLbl.setText("Pins: "+pins.size());
             };
-            SwingUtilities.invokeLater(() -> {
-                ep.show();
-                ep.win.toFront();
-            });
+            SwingUtilities.invokeLater(() -> { ep.show(); ep.win.toFront(); });
             pinCountLbl.setText("Pins: "+pins.size());
         });
     }
 
     private void placeEditorPinWindow(JWindow win, int sx, int sy) {
-        // Center the crosshair on the exact screen point
         win.setLocation(sx - win.getWidth()/2, sy - win.getHeight()/2);
     }
 
-
-
-    // ── Floating pin — crosshair + colored ring + drag ─────────────
     private class EditorPin {
         JWindow win;
         int screenX, screenY, rowIndex;
         DefaultTableModel tm;
         Runnable onRemoved;
-        static final int PSZ = 44; // window size, center = exact screen point
+        static final int PSZ = 44;
 
         EditorPin(int x, int y, int row, DefaultTableModel tm) {
             screenX=x; screenY=y; rowIndex=row; this.tm=tm; build();
@@ -1096,17 +1087,13 @@ public class NodeEditor extends JPanel {
         void build() {
             win = new JWindow();
             win.setAlwaysOnTop(true);
-            // Use near-transparent bg so window is visible but mouse events work
             win.setBackground(new Color(0,0,0,1));
 
-            // Use a solid-bg panel so mouse events are captured reliably on macOS
             JPanel panel = new JPanel(null) {
                 boolean hovered = false;
                 {
-                    // NOT opaque=false — tiny 1-alpha bg catches events on macOS
                     setBackground(new Color(0,0,0,1));
                     setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-
                     addMouseListener(new MouseAdapter(){
                         public void mouseEntered(MouseEvent e){ hovered=true; repaint(); }
                         public void mouseExited(MouseEvent e) { hovered=false; repaint(); }
@@ -1119,13 +1106,10 @@ public class NodeEditor extends JPanel {
                             }
                         }
                     });
-
-                    // Drag: move the JWindow directly, keep it visible
                     int[] off = {0,0};
                     addMouseListener(new MouseAdapter(){
                         public void mousePressed(MouseEvent e){ off[0]=e.getX(); off[1]=e.getY(); }
                         public void mouseReleased(MouseEvent e){
-                            // Sync final position to table
                             if (rowIndex<tm.getRowCount()) {
                                 tm.setValueAt(screenX,rowIndex,1);
                                 tm.setValueAt(screenY,rowIndex,2);
@@ -1139,54 +1123,32 @@ public class NodeEditor extends JPanel {
                             int nx = loc.x + e.getX() - off[0];
                             int ny = loc.y + e.getY() - off[1];
                             win.setLocation(nx, ny);
-                            // Update screen coords (center of window)
-                            screenX = nx + PSZ/2;
-                            screenY = ny + PSZ/2;
+                            screenX = nx + PSZ/2; screenY = ny + PSZ/2;
                             repaint();
                         }
                     });
                 }
-
                 protected void paintComponent(Graphics g) {
                     Graphics2D g2=(Graphics2D)g;
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
                     int cx=getWidth()/2, cy=getHeight()/2;
-
-                    // Ring — smaller size
                     int ringR = 10;
-                    g2.setColor(pinRingColor);
-                    g2.setStroke(new BasicStroke(2f));
+                    g2.setColor(pinRingColor); g2.setStroke(new BasicStroke(2f));
                     g2.drawOval(cx-ringR, cy-ringR, ringR*2, ringR*2);
-
-                    // Crosshair — gap at center
-                    g2.setColor(new Color(255,255,255,230));
-                    g2.setStroke(new BasicStroke(1.5f));
+                    g2.setColor(new Color(255,255,255,230)); g2.setStroke(new BasicStroke(1.5f));
                     int arm=8, gap=4;
-                    g2.drawLine(cx-arm,cy, cx-gap,cy);
-                    g2.drawLine(cx+gap,cy, cx+arm,cy);
-                    g2.drawLine(cx,cy-arm, cx,cy-gap);
-                    g2.drawLine(cx,cy+gap, cx,cy+arm);
-
-                    // Red center dot
-                    g2.setColor(new Color(255,50,50));
-                    g2.fillOval(cx-3,cy-3,6,6);
-
-                    // Number overlaid ON the crosshair — only when NOT hovered (idle state)
-                    // Hidden while hovered so user can see exact position clearly
+                    g2.drawLine(cx-arm,cy, cx-gap,cy); g2.drawLine(cx+gap,cy, cx+arm,cy);
+                    g2.drawLine(cx,cy-arm, cx,cy-gap); g2.drawLine(cx,cy+gap, cx,cy+arm);
+                    g2.setColor(new Color(255,50,50)); g2.fillOval(cx-3,cy-3,6,6);
                     if (!hovered) {
                         String lbl=String.valueOf(rowIndex+1);
                         g2.setFont(new Font("SansSerif",Font.BOLD,9));
-                        FontMetrics fm=g2.getFontMetrics();
-                        int lw=fm.stringWidth(lbl);
-                        // Draw number centered over the cross
-                        g2.setColor(new Color(0,0,0,160));
-                        g2.fillOval(cx-6,cy-6,12,12);
-                        g2.setColor(Color.WHITE);
-                        g2.drawString(lbl, cx-lw/2, cy+4);
+                        FontMetrics fm=g2.getFontMetrics(); int lw=fm.stringWidth(lbl);
+                        g2.setColor(new Color(0,0,0,160)); g2.fillOval(cx-6,cy-6,12,12);
+                        g2.setColor(Color.WHITE); g2.drawString(lbl, cx-lw/2, cy+4);
                     }
                 }
             };
-
             panel.setPreferredSize(new Dimension(PSZ,PSZ));
             win.setContentPane(panel);
             win.setSize(PSZ,PSZ);
@@ -1207,16 +1169,14 @@ public class NodeEditor extends JPanel {
     }
 
     // =========================================================
-    //  REFLECTION HELPERS
+    //  INTERVAL PICKER
     // =========================================================
-    // ── Interval picker popup — same spinners as click interval panel ──
     private long showIntervalPicker(String title, long currentMs) {
         int ivH=(int)(currentMs/3600000L), ivM=(int)((currentMs%3600000L)/60000L);
         int ivS=(int)((currentMs%60000L)/1000L), ivT=(int)((currentMs%1000L)/100L);
         int ivHu=(int)((currentMs%100L)/10L), ivTh=(int)(currentMs%10L);
 
         JDialog dlg = new JDialog((java.awt.Frame)null, title, true);
-        dlg.setUndecorated(false);
         dlg.getContentPane().setBackground(new Color(28,28,38));
         dlg.setLayout(new BorderLayout());
 
@@ -1224,7 +1184,7 @@ public class NodeEditor extends JPanel {
         top.setBackground(new Color(22,22,30));
         top.setBorder(BorderFactory.createEmptyBorder(10,12,8,12));
         JLabel lbl = new JLabel(title);
-        lbl.setForeground(new Color(80,140,255)); lbl.setFont(new Font("SansSerif",Font.BOLD,12));
+        lbl.setForeground(ACCENT); lbl.setFont(new Font("SansSerif",Font.BOLD,12));
         top.add(lbl, BorderLayout.WEST);
         dlg.add(top, BorderLayout.NORTH);
 
@@ -1250,7 +1210,6 @@ public class NodeEditor extends JPanel {
         };
         for (JSpinner sp : sps) spRow.add(sp);
 
-        // Live preview
         JLabel preview = new JLabel("", SwingConstants.CENTER);
         preview.setForeground(new Color(80,200,120));
         preview.setFont(new Font("Monospaced",Font.BOLD,11));
@@ -1305,7 +1264,9 @@ public class NodeEditor extends JPanel {
         return sp;
     }
 
-    // ── Reflection helpers — use getDeclaredField+setAccessible for package-private node classes ──
+    // =========================================================
+    //  REFLECTION HELPERS
+    // =========================================================
     private java.lang.reflect.Field getField(nodes.BaseNode node, String name) throws Exception {
         Class<?> cls = node.getClass();
         while (cls != null) {
@@ -1319,36 +1280,31 @@ public class NodeEditor extends JPanel {
     }
 
     private int getIntField(String name, int def) {
-        try { return (int) getField(currentNode, name).get(currentNode); }
-        catch (Exception e) { return def; }
+        try { return (int) getField(currentNode, name).get(currentNode); } catch (Exception e) { return def; }
     }
     private void setIntField(String name, int val) {
         try { getField(currentNode, name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private long getLongField(String name, long def) {
-        try { return (long) getField(currentNode, name).get(currentNode); }
-        catch (Exception e) { return def; }
+        try { return (long) getField(currentNode, name).get(currentNode); } catch (Exception e) { return def; }
     }
     private void setLongField(String name, long val) {
         try { getField(currentNode, name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private boolean getBoolField(String name, boolean def) {
-        try { return (boolean) getField(currentNode, name).get(currentNode); }
-        catch (Exception e) { return def; }
+        try { return (boolean) getField(currentNode, name).get(currentNode); } catch (Exception e) { return def; }
     }
     private void setBoolField(String name, boolean val) {
         try { getField(currentNode, name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private String getStrField(String name, String def) {
-        try { Object v=getField(currentNode,name).get(currentNode); return v!=null?v.toString():def; }
-        catch (Exception e) { return def; }
+        try { Object v=getField(currentNode,name).get(currentNode); return v!=null?v.toString():def; } catch (Exception e) { return def; }
     }
     private void setStrField(String name, String val) {
         try { getField(currentNode, name).set(currentNode, val); } catch (Exception ignored) {}
     }
     private Object getObjField(String name) {
-        try { return getField(currentNode, name).get(currentNode); }
-        catch (Exception e) { return null; }
+        try { return getField(currentNode, name).get(currentNode); } catch (Exception e) { return null; }
     }
     private void setObjField(String name, Object val) {
         try { getField(currentNode, name).set(currentNode, val); } catch (Exception ignored) {}
@@ -1363,39 +1319,30 @@ public class NodeEditor extends JPanel {
         return new java.util.ArrayList<>();
     }
 
-    /** Parse a table cell value to int — handles Long, Integer, "0.100 s" formatted strings */
     private static int cellToInt(Object val) {
         if (val == null) return 0;
         if (val instanceof Integer) return (Integer)val;
         if (val instanceof Long)    return (int)(long)(Long)val;
         if (val instanceof Number)  return ((Number)val).intValue();
         String s = val.toString().trim();
-        // Handle "0.100 s" → parse as seconds, convert to ms
         if (s.endsWith(" s") || s.endsWith("s")) {
-            try { return (int)(Double.parseDouble(s.replace(" s","").replace("s","").trim()) * 1000); }
-            catch (Exception ignored) {}
+            try { return (int)(Double.parseDouble(s.replace(" s","").replace("s","").trim()) * 1000); } catch (Exception ignored) {}
         }
-        // Try plain integer
-        try { return Integer.parseInt(s); }
-        catch (Exception ignored) {}
-        // Try double
-        try { return (int)Double.parseDouble(s); }
-        catch (Exception ignored) {}
+        try { return Integer.parseInt(s); } catch (Exception ignored) {}
+        try { return (int)Double.parseDouble(s); } catch (Exception ignored) {}
         return 0;
     }
 
     private void syncPointsToNode(DefaultTableModel tm) {
         if (currentNode == null) return;
         java.util.List<int[]> pts = buildPointsList(tm);
-        try { getField(currentNode, "points").set(currentNode, pts); }
-        catch (Exception e) { e.printStackTrace(); }
+        try { getField(currentNode, "points").set(currentNode, pts); } catch (Exception e) { e.printStackTrace(); }
     }
 
     private void syncPointsToNode(DefaultTableModel tm, nodes.BaseNode node) {
         if (node == null) return;
         java.util.List<int[]> pts = buildPointsList(tm);
-        try { getField(node, "points").set(node, pts); }
-        catch (Exception e) { e.printStackTrace(); }
+        try { getField(node, "points").set(node, pts); } catch (Exception e) { e.printStackTrace(); }
     }
 
     private java.util.List<int[]> buildPointsList(DefaultTableModel tm) {
@@ -1403,15 +1350,361 @@ public class NodeEditor extends JPanel {
         for (int i=0;i<tm.getRowCount();i++) {
             try {
                 pts.add(new int[]{
-                    cellToInt(tm.getValueAt(i,1)),
-                    cellToInt(tm.getValueAt(i,2)),
-                    cellToInt(tm.getValueAt(i,3)),
-                    cellToInt(tm.getValueAt(i,4)),
+                    cellToInt(tm.getValueAt(i,1)), cellToInt(tm.getValueAt(i,2)),
+                    cellToInt(tm.getValueAt(i,3)), cellToInt(tm.getValueAt(i,4)),
                     cellToInt(tm.getValueAt(i,5))
                 });
             } catch (Exception e) { e.printStackTrace(); }
         }
         return pts;
+    }
+
+    // =========================================================
+    //  IMAGE NODE
+    // =========================================================
+    private void buildImage() {
+        addSection("Image Name");
+        JTextField nameField = new JTextField(getStrField("imageName","Image"), 16);
+        nameField.setBackground(new Color(35,35,50)); nameField.setForeground(new Color(220,220,230));
+        nameField.setCaretColor(new Color(220,220,230));
+        nameField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(60,60,85)),
+            BorderFactory.createEmptyBorder(4,8,4,8)));
+        nameField.addActionListener(e -> { setStrField("imageName", nameField.getText()); currentNode.label=nameField.getText(); rebuild(); });
+        nameField.addFocusListener(new FocusAdapter(){ public void focusLost(FocusEvent e){ setStrField("imageName", nameField.getText()); currentNode.label=nameField.getText(); rebuild(); }});
+        JPanel nfRow = new JPanel(new FlowLayout(FlowLayout.LEFT,8,4));
+        nfRow.setBackground(BG); nfRow.setAlignmentX(LEFT_ALIGNMENT); nfRow.add(nameField);
+        content.add(nfRow);
+
+        addSection("Template Image");
+        buildCaptureSection("template", "captureRect");
+        addLabeledSpinner("Match threshold %", getIntField("threshold",85), 1, 100, val -> setIntField("threshold", val));
+    }
+
+    // =========================================================
+    //  WATCH CASE NODE
+    // =========================================================
+    private void buildWatchCase() {
+        if (!(currentNode instanceof nodes.WatchCaseNode)) return;
+        nodes.WatchCaseNode wc = (nodes.WatchCaseNode) currentNode;
+
+        addSection("Settings");
+        addLabeledSpinner("Poll interval (ms)", wc.pollIntervalMs, 50, 10000, val -> wc.pollIntervalMs = val);
+        addCheckBox("Loop on match", wc.loopOnMatch, val -> wc.loopOnMatch = val);
+        addLabeledSpinner("Loop delay (ms)", wc.loopDelayMs, 0, 10000, val -> wc.loopDelayMs = val);
+
+        addSection("Watch Zones");
+        addInfo("Each zone is checked with all image cases");
+        for (int zi=0; zi<wc.zones.size(); zi++) {
+            addZoneRow(wc, wc.zones.get(zi), zi);
+        }
+        JLabel addZoneBtn = new JLabel("+ Add Zone");
+        addZoneBtn.setFont(new Font("SansSerif",Font.BOLD,11));
+        addZoneBtn.setForeground(new Color(80,200,120));
+        addZoneBtn.setOpaque(false);
+        addZoneBtn.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(80,200,120),1),
+            BorderFactory.createEmptyBorder(4,14,4,14)));
+        addZoneBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        addZoneBtn.addMouseListener(new MouseAdapter(){
+            public void mouseClicked(MouseEvent e){ wc.addZone(); rebuild(); }
+            public void mouseEntered(MouseEvent e){ addZoneBtn.setForeground(new Color(140,255,170)); addZoneBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(140,255,170),1),BorderFactory.createEmptyBorder(4,14,4,14))); }
+            public void mouseExited(MouseEvent e) { addZoneBtn.setForeground(new Color(80,200,120));  addZoneBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(80,200,120),1),BorderFactory.createEmptyBorder(4,14,4,14))); }
+        });
+        JPanel azRow = new JPanel();
+        azRow.setLayout(new BoxLayout(azRow, BoxLayout.X_AXIS));
+        azRow.setBackground(BG); azRow.setAlignmentX(LEFT_ALIGNMENT);
+        azRow.setBorder(new EmptyBorder(4,0,4,0));
+        azRow.add(Box.createHorizontalGlue());
+        azRow.add(addZoneBtn);
+        azRow.add(Box.createHorizontalGlue());
+        content.add(azRow);
+        addSection("Image Cases");
+        addInfo("Connect Image nodes to add cases (drag Image \u2192 Watch Case)");
+        for (nodes.WatchCaseNode.WatchCase wcase : wc.cases) {
+            addCaseRow(wc, wcase);
+        }
+    }
+
+    // =========================================================
+    //  ZONE ROW  — THE FIXED METHOD
+    // =========================================================
+    private void addZoneRow(nodes.WatchCaseNode wc, nodes.WatchCaseNode.WatchZone zone, int idx) {
+        JPanel row = new JPanel();
+        row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
+        row.setBackground(new Color(28,28,40));
+        row.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(50,80,130)),
+            BorderFactory.createEmptyBorder(3,3,3,3)));
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 300));
+
+        JPanel rowWrap = new JPanel(new BorderLayout());
+        rowWrap.setBackground(BG);
+        rowWrap.setBorder(new EmptyBorder(0,4,0,4));
+        rowWrap.setAlignmentX(LEFT_ALIGNMENT);
+        rowWrap.setMaximumSize(new Dimension(Integer.MAX_VALUE, 300));
+        rowWrap.add(row, BorderLayout.CENTER);
+
+        // ── Header: FlowLayout so name field stays 80px wide ──
+        JPanel hdr = new JPanel(new FlowLayout(FlowLayout.LEFT, 3, 0));
+        hdr.setBackground(new Color(28,28,40));
+        hdr.setAlignmentX(LEFT_ALIGNMENT);
+        hdr.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+
+        JTextField nameF = new JTextField(zone.name);
+        nameF.setBackground(new Color(35,35,55));
+        nameF.setForeground(new Color(140,190,255));
+        nameF.setCaretColor(Color.WHITE);
+        nameF.setBorder(BorderFactory.createLineBorder(new Color(60,80,120)));
+        nameF.setFont(new Font("SansSerif",Font.BOLD,10));
+        nameF.setPreferredSize(new Dimension(80, 22));
+        nameF.setMaximumSize(new Dimension(80, 22));   // ← key fix: cap at 80px
+        nameF.addFocusListener(new FocusAdapter(){
+            public void focusLost(FocusEvent e){ zone.name=nameF.getText().trim(); }
+        });
+
+        // Set Zone — outline style
+        JLabel setZoneBtn = new JLabel(zone.rect!=null ? "\u2713 Set Zone" : "Set Zone");
+        setZoneBtn.setFont(new Font("SansSerif",Font.BOLD,10));
+        setZoneBtn.setForeground(new Color(80,200,120));
+        setZoneBtn.setOpaque(false);
+        setZoneBtn.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(80,200,120),1),
+            BorderFactory.createEmptyBorder(2,6,2,6)));
+        setZoneBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        setZoneBtn.addMouseListener(new MouseAdapter(){
+            public void mouseClicked(MouseEvent e){ captureZoneRect(zone, setZoneBtn); }
+            public void mouseEntered(MouseEvent e){ setZoneBtn.setForeground(new Color(140,255,170)); setZoneBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(140,255,170),1),BorderFactory.createEmptyBorder(2,6,2,6))); }
+            public void mouseExited(MouseEvent e) { setZoneBtn.setForeground(new Color(80,200,120));  setZoneBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(80,200,120),1),BorderFactory.createEmptyBorder(2,6,2,6))); }
+        });
+
+        // Delete Zone — outline style
+        JLabel removeBtn = new JLabel("Delete Zone");
+        removeBtn.setFont(new Font("SansSerif",Font.BOLD,10));
+        removeBtn.setForeground(new Color(220,80,80));
+        removeBtn.setOpaque(false);
+        removeBtn.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(220,80,80),1),
+            BorderFactory.createEmptyBorder(2,6,2,6)));
+        removeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        removeBtn.addMouseListener(new MouseAdapter(){
+            public void mouseClicked(MouseEvent e){ wc.removeZone(idx); rebuild(); }
+            public void mouseEntered(MouseEvent e){ removeBtn.setForeground(new Color(255,120,120)); removeBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(255,120,120),1),BorderFactory.createEmptyBorder(2,6,2,6))); }
+            public void mouseExited(MouseEvent e) { removeBtn.setForeground(new Color(220,80,80));   removeBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(220,80,80),1),BorderFactory.createEmptyBorder(2,6,2,6))); }
+        });
+        // Add all three directly — FlowLayout handles spacing
+        hdr.add(nameF);
+        hdr.add(setZoneBtn);
+        hdr.add(removeBtn);
+        row.add(hdr);
+
+        // Click mode
+        JPanel cmRow = new JPanel(new FlowLayout(FlowLayout.LEFT,4,2));
+        cmRow.setBackground(new Color(28,28,40));
+        cmRow.setAlignmentX(LEFT_ALIGNMENT);
+        JLabel cmLbl = new JLabel("Click:");
+        cmLbl.setForeground(TEXT_DIM); cmLbl.setFont(new Font("SansSerif",Font.PLAIN,10));
+        String[] modes = {"At match","Zone center","Custom pin","No click"};
+        JComboBox<String> cmCombo = new JComboBox<>(modes);
+        cmCombo.setUI(new javax.swing.plaf.basic.BasicComboBoxUI());
+        cmCombo.setSelectedIndex(zone.clickMode);
+        cmCombo.setFont(new Font("SansSerif",Font.PLAIN,10));
+        cmCombo.setBackground(new Color(35,35,55));
+        cmCombo.setForeground(new Color(210,210,220));
+        cmCombo.setOpaque(true);
+        cmCombo.setPreferredSize(new Dimension(110,20));
+        cmCombo.setRenderer(new javax.swing.plaf.basic.BasicComboBoxRenderer(){
+            public java.awt.Component getListCellRendererComponent(JList l,Object v,int i2,boolean s,boolean f){
+                JLabel lbl=(JLabel)super.getListCellRendererComponent(l,v,i2,s,f);
+                lbl.setBackground(s?new Color(60,60,90):new Color(35,35,55));
+                lbl.setForeground(new Color(210,210,220));
+                lbl.setOpaque(true); return lbl;
+            }
+        });
+        cmRow.add(cmLbl); cmRow.add(cmCombo);
+        row.add(cmRow);
+
+        JButton pinBtn = editorBtn("Set Pin", new Color(80,100,160));
+        pinBtn.setFont(new Font("SansSerif",Font.PLAIN,10));
+        pinBtn.setVisible(zone.clickMode == nodes.WatchCaseNode.CLICK_CUSTOM_PIN);
+        if (zone.customPinX > 0 || zone.customPinY > 0)
+            pinBtn.setText("Pin: "+zone.customPinX+","+zone.customPinY);
+        JPanel pinRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT,4,2));
+        pinRow2.setBackground(new Color(28,28,40));
+        pinRow2.setAlignmentX(LEFT_ALIGNMENT);
+        pinRow2.add(pinBtn);
+        row.add(pinRow2);
+
+        cmCombo.addActionListener(e -> {
+            zone.clickMode = cmCombo.getSelectedIndex();
+            pinBtn.setVisible(zone.clickMode == nodes.WatchCaseNode.CLICK_CUSTOM_PIN);
+            row.revalidate();
+        });
+        pinBtn.addActionListener(e -> {
+            Window win = SwingUtilities.getWindowAncestor(this);
+            if (win!=null) win.setVisible(false);
+            new javax.swing.Timer(300, ev -> {
+                ((javax.swing.Timer)ev.getSource()).stop();
+                showSinglePointCapture(zone, pinBtn, win);
+            }).start();
+        });
+
+        JPanel dRow = new JPanel(new FlowLayout(FlowLayout.LEFT,4,2));
+        dRow.setBackground(new Color(28,28,40));
+        dRow.setAlignmentX(LEFT_ALIGNMENT);
+        JLabel dLbl = new JLabel("Click delay ms:");
+        dLbl.setForeground(TEXT_DIM); dLbl.setFont(new Font("SansSerif",Font.PLAIN,10));
+        JSpinner dSp = new JSpinner(new SpinnerNumberModel(zone.clickDelayMs,0,10000,50));
+        dSp.setPreferredSize(new Dimension(65,20));
+        dSp.setBackground(new Color(35,35,55));
+        JSpinner.DefaultEditor dEd = (JSpinner.DefaultEditor)dSp.getEditor();
+        dEd.getTextField().setBackground(new Color(35,35,55));
+        dEd.getTextField().setForeground(new Color(210,210,220));
+        dSp.addChangeListener(e -> zone.clickDelayMs = ((Number)dSp.getValue()).intValue());
+        dRow.add(dLbl); dRow.add(dSp);
+        row.add(dRow);
+
+        content.add(Box.createVerticalStrut(4));
+        content.add(rowWrap);
+    }
+
+    private void captureZoneRect(nodes.WatchCaseNode.WatchZone zone, JLabel btn) {
+        Window win = SwingUtilities.getWindowAncestor(this);
+        if (win!=null) win.setVisible(false);
+        new javax.swing.Timer(300, ev -> {
+            ((javax.swing.Timer)ev.getSource()).stop();
+            showZoneCaptureOverlay(zone, btn, win);
+        }).start();
+    }
+
+    private void showZoneCaptureOverlay(nodes.WatchCaseNode.WatchZone zone, JLabel btn, Window parentWin) {
+        JWindow overlay = new JWindow();
+        overlay.setAlwaysOnTop(true);
+        overlay.setBackground(new Color(0,0,0,0));
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        overlay.setBounds(0,0,screen.width,screen.height);
+        int[] drag={0,0,0,0}; boolean[] dragging={false};
+        JPanel glass = new JPanel(){
+            protected void paintComponent(Graphics g){
+                Graphics2D g2=(Graphics2D)g;
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(0,0,0,80)); g2.fillRect(0,0,getWidth(),getHeight());
+                String msg = "Drag to set Watch Zone: "+zone.name+"   [ESC = cancel]";
+                g2.setFont(new Font("SansSerif",Font.BOLD,15));
+                FontMetrics fm=g2.getFontMetrics(); int tw=fm.stringWidth(msg);
+                g2.setColor(new Color(0,0,0,160));
+                g2.fillRoundRect((getWidth()-tw)/2-12,18,tw+24,32,10,10);
+                g2.setColor(new Color(100,255,160)); g2.drawString(msg,(getWidth()-tw)/2,40);
+                if (dragging[0]){
+                    int rx=Math.min(drag[0],drag[2]),ry=Math.min(drag[1],drag[3]);
+                    int rw=Math.abs(drag[2]-drag[0]),rh=Math.abs(drag[3]-drag[1]);
+                    Composite old=g2.getComposite();
+                    g2.setComposite(AlphaComposite.Clear); g2.fillRect(rx,ry,rw,rh);
+                    g2.setComposite(old);
+                    g2.setColor(new Color(100,255,160)); g2.setStroke(new BasicStroke(2)); g2.drawRect(rx,ry,rw,rh);
+                    g2.setFont(new Font("Monospaced",Font.BOLD,11));
+                    g2.drawString(rw+"x"+rh, rx+4, ry>20?ry-4:ry+rh+16);
+                }
+            }
+        };
+        glass.setOpaque(false); glass.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+        glass.setFocusable(true);
+        glass.addKeyListener(new KeyAdapter(){
+            public void keyPressed(KeyEvent e){
+                if(e.getKeyCode()==KeyEvent.VK_ESCAPE){
+                    overlay.dispose();
+                    if(parentWin!=null) SwingUtilities.invokeLater(()->{parentWin.setVisible(true);parentWin.toFront();});
+                }
+            }
+        });
+        glass.addMouseListener(new MouseAdapter(){
+            public void mousePressed(MouseEvent e){drag[0]=e.getX();drag[1]=e.getY();dragging[0]=true;glass.requestFocusInWindow();}
+            public void mouseReleased(MouseEvent e){
+                dragging[0]=false; overlay.dispose();
+                int rx=Math.min(drag[0],drag[2]),ry=Math.min(drag[1],drag[3]);
+                int rw=Math.abs(drag[2]-drag[0]),rh=Math.abs(drag[3]-drag[1]);
+                if(rw>4&&rh>4){ zone.rect=new java.awt.Rectangle(rx,ry,rw,rh); btn.setText("Zone set \u2713"); }
+                if(parentWin!=null) SwingUtilities.invokeLater(()->{parentWin.setVisible(true);parentWin.toFront();});
+            }
+        });
+        glass.addMouseMotionListener(new MouseMotionAdapter(){
+            public void mouseDragged(MouseEvent e){drag[2]=e.getX();drag[3]=e.getY();glass.repaint();}
+        });
+        overlay.setContentPane(glass); overlay.setVisible(true);
+        SwingUtilities.invokeLater(glass::requestFocusInWindow);
+    }
+
+    private void showSinglePointCapture(nodes.WatchCaseNode.WatchZone zone, JButton btn, Window parentWin) {
+        JWindow overlay = new JWindow();
+        overlay.setAlwaysOnTop(true);
+        overlay.setBackground(new Color(0,0,0,0));
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        overlay.setBounds(0,0,screen.width,screen.height);
+        JPanel glass = new JPanel(){
+            protected void paintComponent(Graphics g){
+                Graphics2D g2=(Graphics2D)g;
+                g2.setColor(new Color(0,0,0,60)); g2.fillRect(0,0,getWidth(),getHeight());
+                String msg="Click to set pin location   [ESC = cancel]";
+                g2.setFont(new Font("SansSerif",Font.BOLD,15));
+                FontMetrics fm=g2.getFontMetrics(); int tw=fm.stringWidth(msg);
+                g2.setColor(new Color(0,0,0,160));
+                g2.fillRoundRect((getWidth()-tw)/2-12,18,tw+24,32,10,10);
+                g2.setColor(new Color(255,200,80)); g2.drawString(msg,(getWidth()-tw)/2,40);
+            }
+        };
+        glass.setOpaque(false); glass.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+        glass.setFocusable(true);
+        glass.addKeyListener(new KeyAdapter(){
+            public void keyPressed(KeyEvent e){
+                if(e.getKeyCode()==KeyEvent.VK_ESCAPE){
+                    overlay.dispose();
+                    if(parentWin!=null) SwingUtilities.invokeLater(()->{parentWin.setVisible(true);parentWin.toFront();});
+                }
+            }
+        });
+        glass.addMouseListener(new MouseAdapter(){
+            public void mouseClicked(MouseEvent e){
+                zone.customPinX=e.getX(); zone.customPinY=e.getY();
+                btn.setText("Pin: "+e.getX()+","+e.getY());
+                overlay.dispose();
+                if(parentWin!=null) SwingUtilities.invokeLater(()->{parentWin.setVisible(true);parentWin.toFront();});
+            }
+        });
+        overlay.setContentPane(glass); overlay.setVisible(true);
+        SwingUtilities.invokeLater(glass::requestFocusInWindow);
+    }
+
+    private void addCaseRow(nodes.WatchCaseNode wc, nodes.WatchCaseNode.WatchCase wcase) {
+        JPanel row = new JPanel();
+        row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
+        row.setBackground(new Color(32,32,44));
+        row.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(55,55,75)),
+            BorderFactory.createEmptyBorder(4,6,4,6)));
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(240,90));
+
+        JPanel topRow = new JPanel(new FlowLayout(FlowLayout.LEFT,4,2));
+        topRow.setBackground(new Color(32,32,44));
+        JLabel nameLbl = new JLabel(wcase.portName);
+        nameLbl.setForeground(new Color(140,200,255)); nameLbl.setFont(new Font("SansSerif",Font.BOLD,11));
+        JLabel thrLbl = new JLabel("Threshold:");
+        thrLbl.setForeground(TEXT_DIM); thrLbl.setFont(new Font("SansSerif",Font.PLAIN,10));
+        JSpinner thrSp = new JSpinner(new SpinnerNumberModel(wcase.threshold,1,100,1));
+        thrSp.setPreferredSize(new Dimension(55,20));
+        thrSp.addChangeListener(e -> wcase.threshold = ((Number)thrSp.getValue()).intValue());
+        topRow.add(nameLbl); topRow.add(thrLbl); topRow.add(thrSp);
+        row.add(topRow);
+
+        JCheckBox outCb = new JCheckBox("Has output port", wcase.hasOutput);
+        outCb.setBackground(new Color(32,32,44)); outCb.setForeground(TEXT_DIM);
+        outCb.setFont(new Font("SansSerif",Font.PLAIN,10));
+        outCb.addActionListener(e -> { wcase.hasOutput = outCb.isSelected(); rebuild(); });
+        row.add(outCb);
+
+        content.add(Box.createVerticalStrut(3));
+        content.add(row);
     }
 
     // =========================================================
@@ -1435,10 +1728,10 @@ public class NodeEditor extends JPanel {
     }
 
     private void addInfo(String text) {
-        JLabel lbl = new JLabel("  " + text);
+        JLabel lbl = new JLabel("<html><body style='width:220px'>" + text + "</body></html>");
         lbl.setForeground(new Color(100,160,100));
         lbl.setFont(new Font("SansSerif",Font.ITALIC,10));
-        lbl.setBorder(new EmptyBorder(2,0,2,0));
+        lbl.setBorder(new EmptyBorder(2,8,2,8));
         lbl.setAlignmentX(LEFT_ALIGNMENT);
         content.add(lbl);
     }

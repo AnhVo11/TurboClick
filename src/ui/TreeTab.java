@@ -37,16 +37,14 @@ public class TreeTab extends JPanel {
         canvas  = new NodeCanvas();
         palette = new NodePalette();
         editor  = new NodeEditor();
-        editor.setPreferredSize(new Dimension(270, 0));
+        editor.setPreferredSize(new Dimension(310, 0));  // increased from 270
         editor.setVisible(false);
 
-        // Canvas row: canvas + editor side by side
         JPanel canvasRow = new JPanel(new BorderLayout(0,0));
         canvasRow.setBackground(new Color(22,22,28));
         canvasRow.add(canvas, BorderLayout.CENTER);
         canvasRow.add(editor, BorderLayout.EAST);
 
-        // Body: palette on top, canvas below
         JPanel body = new JPanel(new BorderLayout(0,0));
         body.setBackground(new Color(22,22,28));
         body.add(palette,   BorderLayout.NORTH);
@@ -55,12 +53,9 @@ public class TreeTab extends JPanel {
         add(buildToolbar(), BorderLayout.NORTH);
         add(body,           BorderLayout.CENTER);
 
-        // Wire palette to canvas for ghost drag
         palette.setTargetCanvas(canvas);
 
-        // Palette click (no drag) → add node at random spread position
         palette.setOnNodeDropped((type, dropPoint) -> {
-            // Only handle click case (drag is handled by canvas.finishGhostDrag)
             if (dropPoint.x == 0 && dropPoint.y == 0) {
                 int cx = 80 + (int)(Math.random() * 400);
                 int cy = 60 + (int)(Math.random() * 250);
@@ -68,16 +63,12 @@ public class TreeTab extends JPanel {
                 canvas.addNode(node);
                 openEditor(node, canvasRow);
             } else {
-                // Drag drop — editor opens via canvas callback
                 BaseNode sel = canvas.getSelectedNode();
                 if (sel != null) openEditor(sel, canvasRow);
             }
         });
 
-        // Smart Pin button → show smart pin bar (same as SimpleClickPanel)
         palette.setOnSmartPinClicked(() -> {
-            // Find the SimpleClickPanel in the app and trigger its smart pin mode
-            // For now show a tooltip-style message on canvas
             JOptionPane.showMessageDialog(this,
                 "Smart Pin mode is available in Build Simple Click.\n" +
                 "Switch to Build Simple Click to use Smart Pin,\n" +
@@ -128,7 +119,6 @@ public class TreeTab extends JPanel {
         loopBtn.addActionListener(e -> {
             if (treeRunning) stopTree();
             else {
-                // Loop mode — restart tree when it finishes
                 loopBtn.setForeground(new Color(255,220,60));
                 startTreeLoop(loopBtn);
             }
@@ -167,7 +157,6 @@ public class TreeTab extends JPanel {
         if (treeRunning) return;
         Map<String, BaseNode> nodeMap = canvas.getNodes();
         if (nodeMap.isEmpty()) { JOptionPane.showMessageDialog(this,"No nodes on canvas.\nClick a node from the palette above to add one."); return; }
-        // Use explicit start node if set, otherwise auto-detect
         String startId = canvas.getStartNodeId();
         if (startId == null || !nodeMap.containsKey(startId))
             startId = findStartNode(nodeMap);
@@ -188,7 +177,6 @@ public class TreeTab extends JPanel {
             });
             treeRunning = true;
             if (onRunStateChanged!=null) onRunStateChanged.run();
-            // Hide main window and show run HUD
             Window w = SwingUtilities.getWindowAncestor(this);
             if (w!=null) w.setVisible(false);
             showRunHud(ctx);
@@ -201,30 +189,50 @@ public class TreeTab extends JPanel {
     private void startTreeLoop(JButton loopBtn) {
         looping = true;
         loopBtn.setText("↺  Looping");
-        Runnable loop = new Runnable() {
-            public void run() {
-                if (!looping) {
-                    loopBtn.setText("↺  Loop");
-                    loopBtn.setForeground(new Color(220,180,40));
-                    return;
+        runOneLoopIteration(loopBtn);
+    }
+
+    private void runOneLoopIteration(JButton loopBtn) {
+        if (!looping) {
+            SwingUtilities.invokeLater(() -> {
+                loopBtn.setText("↺  Loop");
+                loopBtn.setForeground(new Color(220,180,40));
+            });
+            return;
+        }
+        Map<String, BaseNode> nodeMap = canvas.getNodes();
+        if (nodeMap.isEmpty()) { looping = false; return; }
+        String startId = canvas.getStartNodeId();
+        if (startId == null || !nodeMap.containsKey(startId)) startId = findStartNode(nodeMap);
+        if (startId == null) { looping = false; return; }
+        try {
+            ExecutionContext ctx = new ExecutionContext(new java.awt.Robot(), treeId);
+            engine = new RuleEngine(nodeMap, startId, ctx);
+            engine.setOnNodeStart(n  -> SwingUtilities.invokeLater(canvas::repaint));
+            engine.setOnNodeFinish(n -> SwingUtilities.invokeLater(canvas::repaint));
+            engine.setOnTreeFinish(() -> {
+                treeRunning = false;
+                if (looping) {
+                    SwingUtilities.invokeLater(() -> runOneLoopIteration(loopBtn));
+                } else {
+                    SwingUtilities.invokeLater(() -> {
+                        hideRunHud();
+                        Window w = SwingUtilities.getWindowAncestor(TreeTab.this);
+                        if (w!=null) { w.setVisible(true); w.toFront(); }
+                        loopBtn.setText("↺  Loop");
+                        loopBtn.setForeground(new Color(220,180,40));
+                        if (onRunStateChanged!=null) onRunStateChanged.run();
+                    });
                 }
-                startTree();
-                // After tree finishes, restart if still looping
-                new Thread(() -> {
-                    while (treeRunning) {
-                        try { Thread.sleep(200); } catch(InterruptedException ignored) {}
-                    }
-                    if (looping) SwingUtilities.invokeLater(this::run);
-                    else {
-                        SwingUtilities.invokeLater(() -> {
-                            loopBtn.setText("↺  Loop");
-                            loopBtn.setForeground(new Color(220,180,40));
-                        });
-                    }
-                }).start();
-            }
-        };
-        SwingUtilities.invokeLater(loop);
+            });
+            treeRunning = true;
+            if (onRunStateChanged!=null) onRunStateChanged.run();
+            Window w = SwingUtilities.getWindowAncestor(this);
+            if (w!=null && w.isVisible()) w.setVisible(false);
+            if (runHud == null) showRunHud(ctx);
+            else updateHudCtx(ctx);
+            Thread t = new Thread(engine); t.setDaemon(true); t.start();
+        } catch (Exception ex) { ex.printStackTrace(); looping = false; }
     }
 
     public void stopTree() {
@@ -239,8 +247,16 @@ public class TreeTab extends JPanel {
         });
     }
 
-    // ── Run HUD — small floating bar shown while tree is running ──
     private JWindow runHud;
+    private javax.swing.JLabel hudNodeLbl, hudDetailLbl;
+
+    private void updateHudCtx(engine.ExecutionContext ctx) {
+        if (hudNodeLbl == null) return;
+        ctx.setStatusCallback((nodeName, detail) -> SwingUtilities.invokeLater(() -> {
+            hudNodeLbl.setText(nodeName);
+            hudDetailLbl.setText("  " + detail);
+        }));
+    }
 
     private void showRunHud(engine.ExecutionContext ctx) {
         runHud = new JWindow();
@@ -259,7 +275,7 @@ public class TreeTab extends JPanel {
             }
         };
         bar.setOpaque(false);
-        bar.setLayout(new FlowLayout(FlowLayout.CENTER,12,7));
+        bar.setLayout(new FlowLayout(FlowLayout.LEFT,10,7));
 
         JLabel dotLbl = new JLabel("●");
         dotLbl.setFont(new Font("SansSerif",Font.BOLD,12));
@@ -275,31 +291,34 @@ public class TreeTab extends JPanel {
         JLabel nodeLbl = new JLabel("Starting…");
         nodeLbl.setFont(new Font("SansSerif",Font.PLAIN,11));
         nodeLbl.setForeground(new Color(140,200,255));
+        nodeLbl.setPreferredSize(new Dimension(160,18));
 
         JLabel detailLbl = new JLabel("");
         detailLbl.setFont(new Font("Monospaced",Font.BOLD,11));
         detailLbl.setForeground(new Color(80,220,120));
+        detailLbl.setPreferredSize(new Dimension(110,18));
+
+        hudNodeLbl = nodeLbl; hudDetailLbl = detailLbl;
 
         JButton stopBtn = new JButton("■ Stop");
         stopBtn.setBackground(new Color(160,40,40));
         stopBtn.setForeground(Color.WHITE); stopBtn.setOpaque(true);
         stopBtn.setBorderPainted(false); stopBtn.setFocusPainted(false);
         stopBtn.setFont(new Font("SansSerif",Font.BOLD,11));
+        stopBtn.setPreferredSize(new Dimension(88,26));
         stopBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         stopBtn.addActionListener(e -> stopTree());
 
         bar.add(dotLbl); bar.add(taskLbl);
         bar.add(sepLbl); bar.add(nodeLbl); bar.add(detailLbl);
-        bar.add(stopBtn);
+        bar.add(Box.createHorizontalStrut(4)); bar.add(stopBtn);
 
-        // Wire status callback so nodes can update HUD live
         ctx.setStatusCallback((nodeName, detail) -> SwingUtilities.invokeLater(() -> {
             nodeLbl.setText(nodeName);
-            detailLbl.setText("  " + detail);
-            runHud.pack();
+            detailLbl.setText(detail);
+            bar.repaint();
         }));
 
-        // Pulse the dot
         javax.swing.Timer pulse = new javax.swing.Timer(600, e -> {
             if (!treeRunning) { ((javax.swing.Timer)e.getSource()).stop(); return; }
             boolean on = dotLbl.getForeground().equals(new Color(40,220,80));
@@ -308,9 +327,9 @@ public class TreeTab extends JPanel {
         pulse.start();
 
         runHud.setContentPane(bar);
-        runHud.pack();
+        runHud.setSize(580, 46);
         Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
-        runHud.setLocation(screen.width/2 - runHud.getWidth()/2, 18);
+        runHud.setLocation(screen.width/2 - 290, 18);
         runHud.setVisible(true);
     }
 

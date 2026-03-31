@@ -321,6 +321,8 @@ public class NodeFactory {
             case WAIT:         return new WaitNode(x, y);
             case STOP:         return new StopNode(x, y);
             case KEYBOARD:     return new KeyboardNode(x, y);
+            case IMAGE:        return new ImageNode(x, y);
+            case WATCH_CASE:   return new WatchCaseNode(x, y);
             default:           throw new IllegalArgumentException("Unknown node type: " + type);
         }
     }
@@ -335,6 +337,8 @@ public class NodeFactory {
             case WAIT:         return "Wait";
             case STOP:         return "Stop";
             case KEYBOARD:     return "Keyboard";
+            case IMAGE:        return "Image";
+            case WATCH_CASE:   return "Watch Case";
             default:           return type.name();
         }
     }
@@ -349,6 +353,8 @@ public class NodeFactory {
             case WAIT:         return "\u23f1";
             case STOP:         return "\u25a0";
             case KEYBOARD:     return "\u2328";
+            case IMAGE:        return "\ud83d\uddbc";
+            case WATCH_CASE:   return "\u25c9";
             default:           return "?";
         }
     }
@@ -363,6 +369,8 @@ public class NodeFactory {
             case WAIT:         return new Color(80, 150, 150);
             case STOP:         return new Color(180, 50, 50);
             case KEYBOARD:     return new Color(60, 120, 160);
+            case IMAGE:        return new Color(80, 120, 80);
+            case WATCH_CASE:   return new Color(90, 100, 115);
             default:           return Color.GRAY;
         }
     }

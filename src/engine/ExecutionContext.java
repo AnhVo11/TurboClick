@@ -12,6 +12,7 @@ import java.util.List;
 public class ExecutionContext {
 
     private volatile boolean running      = true;
+    private          java.util.Map<String, nodes.BaseNode> nodeMap;
     private volatile boolean treeStopped  = false;
     private final    Robot   robot;
     private final    String  treeId;
@@ -26,6 +27,8 @@ public class ExecutionContext {
 
     // ── Robot ────────────────────────────────────────────────
     public Robot getRobot() { return robot; }
+    public java.util.Map<String, nodes.BaseNode> getNodeMap() { return nodeMap; }
+    public void setNodeMap(java.util.Map<String, nodes.BaseNode> m) { nodeMap = m; }
 
     // ── Running state ────────────────────────────────────────
     public boolean isRunning()    { return running && !treeStopped; }

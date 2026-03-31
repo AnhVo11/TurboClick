@@ -2,7 +2,6 @@ package engine;
 
 import nodes.BaseNode;
 import nodes.BaseNode.RunState;
-import java.awt.Robot;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -31,7 +30,8 @@ public class RuleEngine implements Runnable {
 
     @Override
     public void run() {
-        boolean naturalFinish = false;
+        ctx.setNodeMap(nodes);
+        boolean treeCompleted = false; // true when tree ends for any non-error reason
         try {
             String currentId = startNodeId;
             while (currentId != null && running && ctx.isRunning()) {
@@ -55,10 +55,10 @@ public class RuleEngine implements Runnable {
 
                 if (onNodeFinish != null) onNodeFinish.accept(node);
 
-                // null = Stop node or terminal
-                if (portResult == null) { naturalFinish = true; break; }
+                // null = Stop node (terminal)
+                if (portResult == null) { treeCompleted = true; break; }
 
-                // Follow matching output port
+                // Follow matching connected output port
                 String nextId = null;
                 for (BaseNode.NodePort port : node.outputs) {
                     if (port.name.equals(portResult) && port.enabled) {
@@ -67,15 +67,19 @@ public class RuleEngine implements Runnable {
                         break;
                     }
                 }
+
+                // Unconnected port = end of chain, treat as completed
+                if (nextId == null) { treeCompleted = true; break; }
                 currentId = nextId;
-                // nextId == null means unconnected port — exit without reopening app
             }
+            // Loop ran to end normally
+            if (currentId == null) treeCompleted = true;
         } catch (InterruptedException ignored) {
         } finally {
-            // Only notify (reopen app) if user stopped it or it reached a Stop node
-            final boolean notify = !running || naturalFinish;
+            // Fire onTreeFinish if: tree completed naturally OR user stopped it
+            final boolean notify = treeCompleted || !running;
             new Thread(() -> {
-                try { Thread.sleep(800); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(600); } catch (InterruptedException ignored) {}
                 for (BaseNode n : nodes.values()) n.setRunState(RunState.IDLE);
                 if (notify && onTreeFinish != null) onTreeFinish.run();
             }).start();

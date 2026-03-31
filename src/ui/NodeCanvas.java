@@ -214,6 +214,8 @@ public class NodeCanvas extends JPanel {
             case WAIT:         return "\u23f1";
             case STOP:         return "\u25a0";
             case KEYBOARD:     return "\u2328";
+            case IMAGE:        return "\u25a3";
+            case WATCH_CASE:   return "\u25c9";
             default:           return "\u2022";
         }
     }
@@ -253,6 +255,11 @@ public class NodeCanvas extends JPanel {
     }
 
     private void drawNode(Graphics2D g2, BaseNode node) {
+        // Force Watch Case to minimum size so it looks consistent
+        if (node.type==BaseNode.NodeType.WATCH_CASE) {
+            node.width  = Math.max(182, node.width);
+            node.height = Math.max(122, node.height);
+        }
         int x=node.x, y=node.y, w=node.width, h=node.height;
 
         RunState state=node.runState;
@@ -301,43 +308,177 @@ public class NodeCanvas extends JPanel {
             g2.drawString("\u25b6", x+w-18, y+14);
         }
 
-        int numPorts = node.outputs.size();
-        if (numPorts>0) {
-            int spacing = w / (numPorts+1);
-            for (int i=0; i<numPorts; i++) {
+        if (node.type == BaseNode.NodeType.IMAGE) {
+            // Image node: output port on right-center side
+            int rx = x+w, ry = y+h/2;
+            g2.setColor(new Color(100,200,100));
+            g2.fillOval(rx-5, ry-5, 10, 10);
+            g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1));
+            g2.drawOval(rx-5, ry-5, 10, 10);
+            // Arrow label hint
+            g2.setFont(new Font("SansSerif",Font.BOLD,9));
+            g2.setColor(new Color(150,220,150));
+            g2.drawString("→", rx-14, ry+4);
+        } else if (node.type == BaseNode.NodeType.WATCH_CASE) {
+            // ── Top: standard input dot (accepts connections from other nodes) ──
+            Point inp = node.inputAnchor();
+            g2.setColor(new Color(160,200,255));
+            g2.fillOval(inp.x-5,inp.y-5,10,10);
+            g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1));
+            g2.drawOval(inp.x-5,inp.y-5,10,10);
+
+            // ── Left: placeholder or numbered input ports (Image nodes) ──
+            if (node.inputs.isEmpty()) {
+                // White dot + arrow hint, shifted down a bit from center
+                int phx = x, phy = y + h/2;
+                g2.setColor(Color.WHITE);
+                g2.fillOval(phx-5,phy-5,10,10);
+                g2.setColor(new Color(180,180,200)); g2.setStroke(new BasicStroke(1));
+                g2.drawOval(phx-5,phy-5,10,10);
+                g2.setFont(new Font("SansSerif",Font.BOLD,9));
+                g2.setColor(Color.WHITE);
+                g2.drawString("← Draw Image Line to Here", phx+8, phy+4);
+            } else {
+                for (int i=0; i<node.inputs.size(); i++) {
+                    NodePort port = node.inputs.get(i);
+                    Point ap = node.leftInputAnchor(port.name);
+                    g2.setColor(new Color(100,180,255));
+                    g2.fillOval(ap.x-5,ap.y-5,10,10);
+                    g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1));
+                    g2.drawOval(ap.x-5,ap.y-5,10,10);
+                    g2.setFont(new Font("SansSerif",Font.PLAIN,9));
+                    g2.setColor(new Color(200,220,255));
+                    g2.drawString("Input "+(i+1), ap.x+8, ap.y+4);
+                }
+            }
+            // ── Right: numbered output ports (skip Done/None Found) ──
+            int rOutIdx=0;
+            for (int i=0; i<node.outputs.size(); i++) {
                 NodePort port = node.outputs.get(i);
-                int px = x + spacing*(i+1);
-                int dotY = y+h;
-                Color pc = portColor(port.name);
-                String icon = portIcon(port.name);
-                g2.setFont(new Font("SansSerif",Font.BOLD,10));
-                g2.setColor(pc);
-                FontMetrics fm = g2.getFontMetrics();
-                g2.drawString(icon, px-fm.stringWidth(icon)/2, dotY-10);
-                g2.setColor(pc); g2.fillOval(px-5, dotY-5, 10, 10);
+                if (port.name.equals("None Found")||port.name.equals("Done")) continue;
+                int spacing2 = node.inputs.isEmpty() ? h/2 : h/(node.inputs.size()+1);
+                int py = y + spacing2*(rOutIdx+1);
+                g2.setColor(new Color(60,200,80));
+                g2.fillOval(x+w-5,py-5,10,10);
                 g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1));
-                g2.drawOval(px-5, dotY-5, 10, 10);
+                g2.drawOval(x+w-5,py-5,10,10);
+                String outLbl = "Output "+(rOutIdx+1);
+                g2.setFont(new Font("SansSerif",Font.PLAIN,9));
+                g2.setColor(new Color(180,255,180));
+                FontMetrics fm2=g2.getFontMetrics();
+                g2.drawString(outLbl, x+w-8-fm2.stringWidth(outLbl), py+4);
+                rOutIdx++;
+            }
+            // ── Bottom: Done (left) + None Found (right) ───────
+            int by2=y+h, donePx=x+w/3, nonePx=x+w*2/3;
+            g2.setFont(new Font("SansSerif",Font.BOLD,10));
+            g2.setColor(new Color(60,200,80));
+            g2.drawString("\u2713", donePx-3, by2-10);
+            g2.fillOval(donePx-5,by2-5,10,10);
+            g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1));
+            g2.drawOval(donePx-5,by2-5,10,10);
+            g2.setFont(new Font("SansSerif",Font.BOLD,10));
+            g2.setColor(new Color(220,60,60));
+            g2.drawString("\u2717", nonePx-3, by2-10);
+            g2.fillOval(nonePx-5,by2-5,10,10);
+            g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1));
+            g2.drawOval(nonePx-5,by2-5,10,10);
+        } else {
+            // Standard bottom output ports
+            int numPorts = node.outputs.size();
+            if (numPorts>0) {
+                int spacing = w / (numPorts+1);
+                for (int i=0; i<numPorts; i++) {
+                    NodePort port = node.outputs.get(i);
+                    int px = x + spacing*(i+1);
+                    int dotY = y+h;
+                    Color pc = portColor(port.name);
+                    String icon = portIcon(port.name);
+                    g2.setFont(new Font("SansSerif",Font.BOLD,10));
+                    g2.setColor(pc);
+                    FontMetrics fm = g2.getFontMetrics();
+                    g2.drawString(icon, px-fm.stringWidth(icon)/2, dotY-10);
+                    g2.setColor(pc); g2.fillOval(px-5, dotY-5, 10, 10);
+                    g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1));
+                    g2.drawOval(px-5, dotY-5, 10, 10);
+                }
+            }
+            // Standard top-center input dot (not for IMAGE or WATCH_CASE nodes)
+            if (node.type != BaseNode.NodeType.IMAGE && node.type != BaseNode.NodeType.WATCH_CASE) {
+                Point inp = node.inputAnchor();
+                g2.setColor(new Color(160,200,255));
+                g2.fillOval(inp.x-5,inp.y-5,10,10);
+                g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1));
+                g2.drawOval(inp.x-5,inp.y-5,10,10);
             }
         }
-        Point inp = node.inputAnchor();
-        g2.setColor(new Color(160,200,255));
-        g2.fillOval(inp.x-5,inp.y-5,10,10);
-        g2.setColor(Color.WHITE); g2.setStroke(new BasicStroke(1));
-        g2.drawOval(inp.x-5,inp.y-5,10,10);
     }
 
     private void drawArrows(Graphics2D g2) {
         for (Arrow a : arrows) {
             BaseNode from=nodes.get(a.fromNodeId), to=nodes.get(a.toNodeId);
             if (from==null||to==null) continue;
-            Point src=from.outputAnchor(a.fromPort), dst=to.inputAnchor();
             Color ac = a.selected ? new Color(255,220,60) : portColor(a.fromPort);
-            drawOrthogonalArrow(g2, a, src, dst, ac);
+            // Image → WatchCase: straight horizontal line, right→left
+            if (from.type==BaseNode.NodeType.IMAGE && to.type==BaseNode.NodeType.WATCH_CASE) {
+                // src = right-center of Image node
+                Point src = new Point(from.x+from.width, from.y+from.height/2);
+                Point dst = to.leftInputAnchor(a.label);
+                ac = a.selected ? new Color(255,220,60) : new Color(100,180,255);
+                drawStraightArrow(g2, src, dst, ac, a.label);
+            } else if (from.type==BaseNode.NodeType.WATCH_CASE) {
+                // Watch Case: right-side ports use rightOutputAnchor, bottom ports use normal
+                Point src;
+                if (a.fromPort.equals("Done")||a.fromPort.equals("None Found")) {
+                    src = from.outputAnchor(a.fromPort);
+                } else {
+                    src = from.rightOutputAnchor(a.fromPort);
+                }
+                Point dst = to.inputAnchor();
+                drawOrthogonalArrow(g2, a, src, dst, ac);
+            } else {
+                Point src = from.outputAnchor(a.fromPort);
+                Point dst = to.inputAnchor();
+                drawOrthogonalArrow(g2, a, src, dst, ac);
+            }
         }
     }
 
+    /** Draw a straight line arrow (for Image→WatchCase connections) */
+    private void drawStraightArrow(Graphics2D g2, Point src, Point dst, Color color, String label) {
+        g2.setColor(color);
+        g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.drawLine(src.x, src.y, dst.x, dst.y);
+        // Arrowhead pointing left (into WatchCase)
+        drawArrowHeadDir(g2, src, dst, color);
+        // Label at midpoint
+        if (label!=null&&!label.isEmpty()) {
+            int mx=(src.x+dst.x)/2, my=(src.y+dst.y)/2;
+            g2.setFont(new Font("SansSerif",Font.BOLD,9));
+            FontMetrics fm=g2.getFontMetrics(); int lw=fm.stringWidth(label);
+            g2.setColor(new Color(20,20,32,180));
+            g2.fillRoundRect(mx-lw/2-3,my-12,lw+6,14,5,5);
+            g2.setColor(new Color(180,220,255));
+            g2.drawString(label, mx-lw/2, my);
+        }
+    }
+
+    /** Arrowhead pointing in direction from src→dst */
+    private void drawArrowHeadDir(Graphics2D g2, Point src, Point dst, Color color) {
+        double angle = Math.atan2(dst.y-src.y, dst.x-src.x);
+        int sz=7;
+        int ax=(int)(dst.x-sz*Math.cos(angle-0.4));
+        int ay=(int)(dst.y-sz*Math.sin(angle-0.4));
+        int bx=(int)(dst.x-sz*Math.cos(angle+0.4));
+        int by=(int)(dst.y-sz*Math.sin(angle+0.4));
+        g2.setColor(color);
+        g2.fillPolygon(new int[]{dst.x,ax,bx}, new int[]{dst.y,ay,by}, 3);
+    }
+
     private void drawLiveArrow(Graphics2D g2) {
-        Point src=connectFrom.outputAnchor(connectPort);
+        Point src = connectFrom.type==BaseNode.NodeType.IMAGE
+            ? new Point(connectFrom.x+connectFrom.width, connectFrom.y+connectFrom.height/2)
+            : connectFrom.outputAnchor(connectPort);
         int mx=(int)((connectMouse.x-panX)/zoom), my=(int)((connectMouse.y-panY)/zoom);
         g2.setColor(ARROW_HOVER);
         g2.setStroke(new BasicStroke(1.5f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND));
@@ -405,6 +546,37 @@ public class NodeCanvas extends JPanel {
             panning=true; panDragStartX=e.getX()-panX; panDragStartY=e.getY()-panY; return;
         }
         for (BaseNode node:nodes.values()) {
+            // WATCH_CASE: right-side case ports + bottom Done/None Found
+            if (node.type==BaseNode.NodeType.WATCH_CASE) {
+                int bhy = node.y+node.height;
+                // Done — hardcoded left-third bottom
+                Point doneAnchor = new Point(node.x+node.width/3, bhy);
+                if (cv.distance(doneAnchor)<12) {
+                    connectFrom=node; connectPort="Done"; connectMouse=e.getPoint(); return;
+                }
+                // None Found — hardcoded right-third bottom
+                Point noneAnchor = new Point(node.x+node.width*2/3, bhy);
+                if (cv.distance(noneAnchor)<12) {
+                    connectFrom=node; connectPort="None Found"; connectMouse=e.getPoint(); return;
+                }
+                // Right-side case output ports
+                for (NodePort port : node.outputs) {
+                    if (port.name.equals("Done")||port.name.equals("None Found")) continue;
+                    Point anchor=node.rightOutputAnchor(port.name);
+                    if (cv.distance(anchor)<12) {
+                        connectFrom=node; connectPort=port.name; connectMouse=e.getPoint(); return;
+                    }
+                }
+                continue;
+            }
+            // IMAGE node: output is right-center, not bottom
+            if (node.type==BaseNode.NodeType.IMAGE) {
+                Point anchor=new Point(node.x+node.width, node.y+node.height/2);
+                if (cv.distance(anchor)<12) {
+                    connectFrom=node; connectPort="Image"; connectMouse=e.getPoint(); return;
+                }
+                continue;
+            }
             for (NodePort port:node.outputs) {
                 Point anchor=node.outputAnchor(port.name);
                 if (cv.distance(anchor)<12) {
@@ -451,11 +623,30 @@ public class NodeCanvas extends JPanel {
             Point cv=screenToCanvas(e.getPoint());
             BaseNode target=nodeAt(cv);
             if (target!=null&&target!=connectFrom) {
-                connectFrom.setPortTarget(connectPort,target.id);
-                arrows.removeIf(a->a.fromNodeId.equals(connectFrom.id)&&a.fromPort.equals(connectPort));
-                NodePort port=null;
-                for (NodePort p:connectFrom.outputs) if(p.name.equals(connectPort)){port=p;break;}
-                arrows.add(new Arrow(connectFrom.id,connectPort,target.id,port!=null?port.displayLabel():connectPort));
+                // Special: Image node → Watch Case creates a new input case
+                if (connectFrom.type==BaseNode.NodeType.IMAGE &&
+                    target.type==BaseNode.NodeType.WATCH_CASE) {
+                    nodes.WatchCaseNode wc=(nodes.WatchCaseNode)target;
+                    String caseName=connectFrom.label;
+                    // Avoid duplicate
+                    // Prevent same Image node connecting twice
+                    boolean alreadyConnected = wc.inputPortToNodeId.containsValue(connectFrom.id);
+                    if (!alreadyConnected) {
+                        // Use image label, but make unique if name collision
+                        String cn = connectFrom.label;
+                        int suffix=2;
+                        while(wc.inputPortToNodeId.containsKey(cn)) cn=connectFrom.label+" "+suffix++;
+                        wc.addCase(cn);
+                        wc.inputPortToNodeId.put(cn, connectFrom.id);
+                        arrows.add(new Arrow(connectFrom.id,"Image",target.id,cn));
+                    }
+                } else {
+                    connectFrom.setPortTarget(connectPort,target.id);
+                    arrows.removeIf(a->a.fromNodeId.equals(connectFrom.id)&&a.fromPort.equals(connectPort));
+                    NodePort port=null;
+                    for (NodePort p:connectFrom.outputs) if(p.name.equals(connectPort)){port=p;break;}
+                    arrows.add(new Arrow(connectFrom.id,connectPort,target.id,port!=null?port.displayLabel():connectPort));
+                }
                 notifyChanged();
             }
             connectFrom=null; connectPort=null; connectMouse=null; repaint(); return;

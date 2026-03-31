@@ -15,13 +15,15 @@ public class NodePalette extends JPanel {
 
     private static final BaseNode.NodeType[] PALETTE_TYPES = {
         BaseNode.NodeType.WATCH_ZONE,
+        BaseNode.NodeType.IMAGE,
+        BaseNode.NodeType.WATCH_CASE,
         BaseNode.NodeType.SIMPLE_CLICK,
         BaseNode.NodeType.KEYBOARD,
         BaseNode.NodeType.WAIT,
         BaseNode.NodeType.STOP
     };
-    private static final String[] ICONS = { "\u25ce","\u2295","\u2328","\u23f1","\u25a0" };
-    private static final String[] NAMES = { "Watch Zone","Simple Click","Keyboard","Wait","Stop" };
+    private static final String[] ICONS = { "\u25ce","\u25a3","\u25c9","\u2295","\u2328","\u23f1","\u25a0" };
+    private static final String[] NAMES = { "Watch Zone","Image","Watch Case","Simple Click","Keyboard","Wait","Stop" };
 
     private BaseNode.NodeType draggingType = null;
 
