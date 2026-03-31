@@ -280,16 +280,24 @@ public class NodeEditor extends JPanel {
         };
         glass.setOpaque(false); glass.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
         glass.setFocusable(true);
-        glass.addKeyListener(new KeyAdapter(){
-            public void keyPressed(KeyEvent e){
-                if (e.getKeyCode()==KeyEvent.VK_ESCAPE){
+        java.awt.KeyEventDispatcher kedF = e2 -> {
+            if (e2.getID()==KeyEvent.KEY_PRESSED && e2.getKeyCode()==KeyEvent.VK_ESCAPE) {
+                SwingUtilities.invokeLater(() -> {
                     overlay.dispose();
-                    if (parentWindow!=null) SwingUtilities.invokeLater(()->{ parentWindow.setVisible(true); parentWindow.toFront(); });
-                }
+                    if (parentWindow!=null) { parentWindow.setVisible(true); parentWindow.toFront(); }
+                });
+                return true;
+            }
+            return false;
+        };
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(kedF);
+        overlay.addWindowListener(new java.awt.event.WindowAdapter(){
+            public void windowClosed(java.awt.event.WindowEvent e){
+                KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(kedF);
             }
         });
         glass.addMouseListener(new MouseAdapter(){
-            public void mousePressed(MouseEvent e){ drag[0]=e.getX(); drag[1]=e.getY(); dragging[0]=true; glass.requestFocusInWindow(); }
+            public void mousePressed(MouseEvent e){ drag[0]=e.getX(); drag[1]=e.getY(); dragging[0]=true; }
             public void mouseReleased(MouseEvent e){
                 dragging[0]=false; overlay.dispose();
                 int rx=Math.min(drag[0],drag[2]),ry=Math.min(drag[1],drag[3]);
@@ -309,10 +317,9 @@ public class NodeEditor extends JPanel {
             }
         });
         glass.addMouseMotionListener(new MouseMotionAdapter(){
-            public void mouseDragged(MouseEvent e){ drag[2]=e.getX(); drag[3]=e.getY(); glass.repaint(); }
+            public void mouseDragged(MouseEvent e){ drag[2]=e.getX(); drag[3]=e.getY(); glass.paintImmediately(0,0,glass.getWidth(),glass.getHeight()); }
         });
         overlay.setContentPane(glass); overlay.setVisible(true);
-        SwingUtilities.invokeLater(glass::requestFocusInWindow);
     }
 
     // =========================================================
@@ -416,14 +423,22 @@ public class NodeEditor extends JPanel {
             }
         });
         glass.addMouseMotionListener(new MouseMotionAdapter() {
-            public void mouseDragged(MouseEvent e) { drag[2]=e.getX(); drag[3]=e.getY(); glass.repaint(); }
+            public void mouseDragged(MouseEvent e) { drag[2]=e.getX(); drag[3]=e.getY(); glass.paintImmediately(0,0,glass.getWidth(),glass.getHeight()); }
         });
-        glass.addKeyListener(new KeyAdapter() {
-            public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode()==KeyEvent.VK_ESCAPE) {
+        java.awt.KeyEventDispatcher kedO = e2 -> {
+            if (e2.getID()==KeyEvent.KEY_PRESSED && e2.getKeyCode()==KeyEvent.VK_ESCAPE) {
+                SwingUtilities.invokeLater(() -> {
                     overlay.dispose();
                     if (parentWindow!=null) { parentWindow.setVisible(true); parentWindow.toFront(); }
-                }
+                });
+                return true;
+            }
+            return false;
+        };
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(kedO);
+        overlay.addWindowListener(new java.awt.event.WindowAdapter(){
+            public void windowClosed(java.awt.event.WindowEvent e){
+                KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(kedO);
             }
         });
 
@@ -1458,25 +1473,39 @@ public class NodeEditor extends JPanel {
         nameF.setCaretColor(Color.WHITE);
         nameF.setBorder(BorderFactory.createLineBorder(new Color(60,80,120)));
         nameF.setFont(new Font("SansSerif",Font.BOLD,10));
-        nameF.setPreferredSize(new Dimension(80, 22));
-        nameF.setMaximumSize(new Dimension(80, 22));   // ← key fix: cap at 80px
+        nameF.setPreferredSize(new Dimension(110, 22));
+        nameF.setMaximumSize(new Dimension(110, 22));
         nameF.addFocusListener(new FocusAdapter(){
             public void focusLost(FocusEvent e){ zone.name=nameF.getText().trim(); }
         });
 
-        // Set Zone — outline style
-        JLabel setZoneBtn = new JLabel(zone.rect!=null ? "\u2713 Set Zone" : "Set Zone");
+        // Set Zone / Edit Zone — outline style, context-aware
+        boolean zoneAlreadySet = zone.rect != null;
+        JLabel setZoneBtn = new JLabel(zoneAlreadySet ? "\u270e Edit Zone" : "\u25a3 Set Zone");
         setZoneBtn.setFont(new Font("SansSerif",Font.BOLD,10));
-        setZoneBtn.setForeground(new Color(80,200,120));
+        Color szNormal = zoneAlreadySet ? new Color(220,190,50) : new Color(80,200,120);
+        Color szHover  = zoneAlreadySet ? new Color(255,230,80) : new Color(140,255,170);
+        setZoneBtn.setForeground(szNormal);
         setZoneBtn.setOpaque(false);
         setZoneBtn.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(80,200,120),1),
+            BorderFactory.createLineBorder(szNormal,1),
             BorderFactory.createEmptyBorder(2,6,2,6)));
         setZoneBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         setZoneBtn.addMouseListener(new MouseAdapter(){
-            public void mouseClicked(MouseEvent e){ captureZoneRect(zone, setZoneBtn); }
-            public void mouseEntered(MouseEvent e){ setZoneBtn.setForeground(new Color(140,255,170)); setZoneBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(140,255,170),1),BorderFactory.createEmptyBorder(2,6,2,6))); }
-            public void mouseExited(MouseEvent e) { setZoneBtn.setForeground(new Color(80,200,120));  setZoneBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(80,200,120),1),BorderFactory.createEmptyBorder(2,6,2,6))); }
+            public void mouseClicked(MouseEvent e){
+                if (zone.rect != null) showZoneEditOverlay(zone, setZoneBtn);
+                else captureZoneRect(zone, setZoneBtn);
+            }
+            public void mouseEntered(MouseEvent e){
+                Color c = zone.rect!=null ? new Color(255,230,80) : new Color(140,255,170);
+                setZoneBtn.setForeground(c);
+                setZoneBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(c,1),BorderFactory.createEmptyBorder(2,6,2,6)));
+            }
+            public void mouseExited(MouseEvent e){
+                Color c = zone.rect!=null ? new Color(220,190,50) : new Color(80,200,120);
+                setZoneBtn.setForeground(c);
+                setZoneBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(c,1),BorderFactory.createEmptyBorder(2,6,2,6)));
+            }
         });
 
         // Delete Zone — outline style
@@ -1610,29 +1639,264 @@ public class NodeEditor extends JPanel {
         };
         glass.setOpaque(false); glass.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
         glass.setFocusable(true);
-        glass.addKeyListener(new KeyAdapter(){
-            public void keyPressed(KeyEvent e){
-                if(e.getKeyCode()==KeyEvent.VK_ESCAPE){
-                    overlay.dispose();
-                    if(parentWin!=null) SwingUtilities.invokeLater(()->{parentWin.setVisible(true);parentWin.toFront();});
+        com.github.kwhat.jnativehook.keyboard.NativeKeyListener escZ =
+            new com.github.kwhat.jnativehook.keyboard.NativeKeyListener() {
+                public void nativeKeyPressed(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent e){
+                    if (e.getKeyCode()==com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_ESCAPE)
+                        SwingUtilities.invokeLater(() -> {
+                            overlay.dispose();
+                            if(parentWin!=null) { parentWin.setVisible(true); parentWin.toFront(); }
+                        });
                 }
+                public void nativeKeyReleased(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent e){}
+                public void nativeKeyTyped(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent e){}
+            };
+        try { com.github.kwhat.jnativehook.GlobalScreen.addNativeKeyListener(escZ); } catch(Exception ignored){}
+        overlay.addWindowListener(new java.awt.event.WindowAdapter(){
+            public void windowClosed(java.awt.event.WindowEvent e){
+                try { com.github.kwhat.jnativehook.GlobalScreen.removeNativeKeyListener(escZ); } catch(Exception ignored){}
             }
         });
         glass.addMouseListener(new MouseAdapter(){
-            public void mousePressed(MouseEvent e){drag[0]=e.getX();drag[1]=e.getY();dragging[0]=true;glass.requestFocusInWindow();}
+            public void mousePressed(MouseEvent e){drag[0]=e.getX();drag[1]=e.getY();dragging[0]=true;}
             public void mouseReleased(MouseEvent e){
                 dragging[0]=false; overlay.dispose();
                 int rx=Math.min(drag[0],drag[2]),ry=Math.min(drag[1],drag[3]);
                 int rw=Math.abs(drag[2]-drag[0]),rh=Math.abs(drag[3]-drag[1]);
-                if(rw>4&&rh>4){ zone.rect=new java.awt.Rectangle(rx,ry,rw,rh); btn.setText("Zone set \u2713"); }
+                if(rw>4&&rh>4){
+                    zone.rect=new java.awt.Rectangle(rx,ry,rw,rh);
+                    btn.setText("\u270e Edit Zone");
+                    btn.setForeground(new Color(220,190,50));
+                    btn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(220,190,50),1),BorderFactory.createEmptyBorder(2,6,2,6)));
+                }
                 if(parentWin!=null) SwingUtilities.invokeLater(()->{parentWin.setVisible(true);parentWin.toFront();});
             }
         });
         glass.addMouseMotionListener(new MouseMotionAdapter(){
-            public void mouseDragged(MouseEvent e){drag[2]=e.getX();drag[3]=e.getY();glass.repaint();}
+            public void mouseDragged(MouseEvent e){drag[2]=e.getX();drag[3]=e.getY();glass.paintImmediately(0,0,glass.getWidth(),glass.getHeight());}
         });
         overlay.setContentPane(glass); overlay.setVisible(true);
-        SwingUtilities.invokeLater(glass::requestFocusInWindow);
+    }
+
+    private void showZoneEditOverlay(nodes.WatchCaseNode.WatchZone zone, JLabel btn) {
+        Window win = SwingUtilities.getWindowAncestor(this);
+        if (win!=null) win.setVisible(false);
+        new javax.swing.Timer(300, ev -> {
+            ((javax.swing.Timer)ev.getSource()).stop();
+
+            Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+            JWindow overlay = new JWindow();
+            overlay.setAlwaysOnTop(true);
+            overlay.setBackground(new Color(0,0,0,0));
+            overlay.setBounds(0,0,screen.width,screen.height);
+
+            int[] R = { zone.rect.x, zone.rect.y, zone.rect.width, zone.rect.height };
+            final int H = 12;
+            int[] dragMode   = {0};
+            int[] dragStart  = {0,0};
+            int[] rectAtDrag = {0,0,0,0};
+
+            // ── Labels we update during drag ─────────────────
+            final String[] sizeTxt = { R[2]+"x"+R[3]+"  ("+R[0]+","+R[1]+")" };
+
+            // ── Glass panel — everything drawn here ───────────
+            JPanel glass = new JPanel(null) {
+                protected void paintComponent(Graphics g) {
+                    Graphics2D g2=(Graphics2D)g;
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+
+                    // Semi-dark overlay
+                    g2.setColor(new Color(0,0,0,120));
+                    g2.fillRect(0,0,getWidth(),getHeight());
+
+                    // Bright rect border — no AlphaComposite, just draw on top
+                    g2.setColor(new Color(0,200,255,80));
+                    g2.fillRect(R[0],R[1],R[2],R[3]);
+                    g2.setColor(new Color(80,200,255));
+                    g2.setStroke(new BasicStroke(2));
+                    g2.drawRect(R[0],R[1],R[2],R[3]);
+
+                    // 8 handles
+                    g2.setColor(Color.WHITE);
+                    for (int[] hh : getHandles(R,H)) g2.fillRect(hh[0],hh[1],H,H);
+
+                    // Size label near rect
+                    String info = sizeTxt[0];
+                    g2.setFont(new Font("Monospaced",Font.BOLD,11));
+                    FontMetrics fm=g2.getFontMetrics(); int sw=fm.stringWidth(info);
+                    int lx=R[0], ly=R[1]>22?R[1]-6:R[1]+R[3]+16;
+                    g2.setColor(new Color(0,0,0,180)); g2.fillRoundRect(lx-2,ly-13,sw+8,17,4,4);
+                    g2.setColor(new Color(80,220,255)); g2.drawString(info,lx+2,ly);
+                }
+            };
+            glass.setOpaque(false);
+            glass.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+
+            // ── Control bar — embedded at top of glass ────────
+            int barW=560, barH=44;
+            JPanel ctrlBar = new JPanel(new FlowLayout(FlowLayout.CENTER,12,8)) {
+                protected void paintComponent(Graphics g){
+                    Graphics2D g2=(Graphics2D)g;
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                    g2.setColor(new Color(15,15,22,245)); g2.fillRoundRect(0,0,getWidth(),getHeight(),16,16);
+                    g2.setColor(new Color(80,200,255,220)); g2.setStroke(new BasicStroke(1.5f));
+                    g2.drawRoundRect(0,0,getWidth()-1,getHeight()-1,16,16);
+                    g2.setColor(new Color(80,200,255,200)); g2.fillRoundRect(0,0,getWidth(),3,4,4);
+                }
+            };
+            ctrlBar.setOpaque(false);
+            ctrlBar.setBounds(screen.width/2-barW/2, 12, barW, barH);
+
+            JLabel infoLbl = new JLabel("Drag to move  ·  Handles to resize");
+            infoLbl.setFont(new Font("SansSerif",Font.PLAIN,11));
+            infoLbl.setForeground(new Color(160,200,255));
+
+            JLabel sizeLbl = new JLabel(sizeTxt[0]);
+            sizeLbl.setFont(new Font("Monospaced",Font.BOLD,11));
+            sizeLbl.setForeground(new Color(80,220,120));
+            sizeLbl.setPreferredSize(new Dimension(150,16));
+
+            JLabel sep1=new JLabel("|"); sep1.setForeground(new Color(60,60,90));
+            JLabel sep2=new JLabel("|"); sep2.setForeground(new Color(60,60,90));
+
+            JLabel doneBtn = new JLabel("  \u2713 Done  ");
+            doneBtn.setFont(new Font("SansSerif",Font.BOLD,12));
+            doneBtn.setForeground(new Color(80,220,120));
+            doneBtn.setOpaque(false);
+            doneBtn.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(80,220,120),1),
+                BorderFactory.createEmptyBorder(2,8,2,8)));
+            doneBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+            JLabel escLbl = new JLabel("ESC = cancel");
+            escLbl.setFont(new Font("SansSerif",Font.PLAIN,10));
+            escLbl.setForeground(new Color(100,100,130));
+
+            ctrlBar.add(infoLbl); ctrlBar.add(sep1); ctrlBar.add(sizeLbl);
+            ctrlBar.add(sep2); ctrlBar.add(doneBtn); ctrlBar.add(escLbl);
+            glass.add(ctrlBar);
+
+            // ── Finish / cancel ───────────────────────────────
+            Runnable confirm = () -> SwingUtilities.invokeLater(() -> {
+                zone.rect = new java.awt.Rectangle(R[0],R[1],R[2],R[3]);
+                btn.setText("\u270e Edit Zone");
+                btn.setForeground(new Color(220,190,50));
+                btn.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(new Color(220,190,50),1),
+                    BorderFactory.createEmptyBorder(2,6,2,6)));
+                overlay.dispose();
+                if(win!=null) { win.setVisible(true); win.toFront(); }
+            });
+            Runnable cancel = () -> SwingUtilities.invokeLater(() -> {
+                overlay.dispose();
+                if(win!=null) { win.setVisible(true); win.toFront(); }
+            });
+
+            doneBtn.addMouseListener(new MouseAdapter(){
+                public void mouseClicked(MouseEvent e){ confirm.run(); }
+                public void mouseEntered(MouseEvent e){
+                    doneBtn.setForeground(new Color(140,255,170));
+                    doneBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(140,255,170),1),BorderFactory.createEmptyBorder(2,8,2,8)));
+                }
+                public void mouseExited(MouseEvent e){
+                    doneBtn.setForeground(new Color(80,220,120));
+                    doneBtn.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(80,220,120),1),BorderFactory.createEmptyBorder(2,8,2,8)));
+                }
+            });
+
+            // ── ESC via jNativeHook (works without AWT focus) ─
+            com.github.kwhat.jnativehook.keyboard.NativeKeyListener escListener =
+                new com.github.kwhat.jnativehook.keyboard.NativeKeyListener() {
+                    public void nativeKeyPressed(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent e){
+                        if (e.getKeyCode()==com.github.kwhat.jnativehook.keyboard.NativeKeyEvent.VC_ESCAPE)
+                            cancel.run();
+                    }
+                    public void nativeKeyReleased(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent e){}
+                    public void nativeKeyTyped(com.github.kwhat.jnativehook.keyboard.NativeKeyEvent e){}
+                };
+            try { com.github.kwhat.jnativehook.GlobalScreen.addNativeKeyListener(escListener); }
+            catch(Exception ignored){}
+            overlay.addWindowListener(new java.awt.event.WindowAdapter(){
+                public void windowClosed(java.awt.event.WindowEvent e){
+                    try { com.github.kwhat.jnativehook.GlobalScreen.removeNativeKeyListener(escListener); }
+                    catch(Exception ignored){}
+                }
+            });
+
+            // ── Mouse drag/resize — skip if click on ctrlBar ──
+            glass.addMouseListener(new MouseAdapter(){
+                public void mousePressed(MouseEvent e){
+                    if (ctrlBar.getBounds().contains(e.getPoint())) return;
+                    dragStart[0]=e.getX(); dragStart[1]=e.getY();
+                    rectAtDrag[0]=R[0]; rectAtDrag[1]=R[1]; rectAtDrag[2]=R[2]; rectAtDrag[3]=R[3];
+                    int[][] handles=getHandles(R,H);
+                    dragMode[0]=1;
+                    for (int i=0;i<handles.length;i++){
+                        if (new java.awt.Rectangle(handles[i][0],handles[i][1],H,H).contains(e.getPoint())){
+                            dragMode[0]=i+2; break;
+                        }
+                    }
+                    java.awt.Rectangle rr=new java.awt.Rectangle(R[0],R[1],R[2],R[3]);
+                    if (!rr.contains(e.getPoint()) && dragMode[0]==1) dragMode[0]=0;
+                }
+                public void mouseReleased(MouseEvent e){ dragMode[0]=0; }
+            });
+
+            glass.addMouseMotionListener(new MouseMotionAdapter(){
+                public void mouseDragged(MouseEvent e){
+                    if (dragMode[0]==0) return;
+                    int dx=e.getX()-dragStart[0], dy=e.getY()-dragStart[1];
+                    switch(dragMode[0]){
+                        case 1: R[0]=rectAtDrag[0]+dx; R[1]=rectAtDrag[1]+dy; break;
+                        case 2: R[0]=rectAtDrag[0]+dx; R[1]=rectAtDrag[1]+dy; R[2]=Math.max(20,rectAtDrag[2]-dx); R[3]=Math.max(20,rectAtDrag[3]-dy); break;
+                        case 3: R[1]=rectAtDrag[1]+dy; R[3]=Math.max(20,rectAtDrag[3]-dy); break;
+                        case 4: R[1]=rectAtDrag[1]+dy; R[2]=Math.max(20,rectAtDrag[2]+dx); R[3]=Math.max(20,rectAtDrag[3]-dy); break;
+                        case 5: R[2]=Math.max(20,rectAtDrag[2]+dx); break;
+                        case 6: R[2]=Math.max(20,rectAtDrag[2]+dx); R[3]=Math.max(20,rectAtDrag[3]+dy); break;
+                        case 7: R[3]=Math.max(20,rectAtDrag[3]+dy); break;
+                        case 8: R[0]=rectAtDrag[0]+dx; R[2]=Math.max(20,rectAtDrag[2]-dx); R[3]=Math.max(20,rectAtDrag[3]+dy); break;
+                        case 9: R[0]=rectAtDrag[0]+dx; R[2]=Math.max(20,rectAtDrag[2]-dx); break;
+                    }
+                    sizeTxt[0] = R[2]+"x"+R[3]+"  ("+R[0]+","+R[1]+")";
+                    sizeLbl.setText(sizeTxt[0]);
+                    glass.repaint();
+                }
+                public void mouseMoved(MouseEvent e){
+                    if (ctrlBar.getBounds().contains(e.getPoint())){
+                        glass.setCursor(Cursor.getDefaultCursor()); return;
+                    }
+                    int[][] handles=getHandles(R,H);
+                    int[] cursors={Cursor.NW_RESIZE_CURSOR,Cursor.N_RESIZE_CURSOR,Cursor.NE_RESIZE_CURSOR,
+                                   Cursor.E_RESIZE_CURSOR,Cursor.SE_RESIZE_CURSOR,Cursor.S_RESIZE_CURSOR,
+                                   Cursor.SW_RESIZE_CURSOR,Cursor.W_RESIZE_CURSOR};
+                    for (int i=0;i<handles.length;i++){
+                        if (new java.awt.Rectangle(handles[i][0],handles[i][1],H,H).contains(e.getPoint())){
+                            glass.setCursor(Cursor.getPredefinedCursor(cursors[i])); return;
+                        }
+                    }
+                    java.awt.Rectangle rr=new java.awt.Rectangle(R[0],R[1],R[2],R[3]);
+                    glass.setCursor(Cursor.getPredefinedCursor(rr.contains(e.getPoint())?Cursor.MOVE_CURSOR:Cursor.DEFAULT_CURSOR));
+                }
+            });
+
+            overlay.setContentPane(glass);
+            overlay.setVisible(true);
+        }).start();
+    }
+
+    /** Returns 8 handle rects: TL, T, TR, R, BR, B, BL, L */
+    private int[][] getHandles(int[] R, int H) {
+        int x=R[0],y=R[1],w=R[2],h=R[3],h2=H/2;
+        return new int[][]{
+            {x-h2,         y-h2        }, // TL
+            {x+w/2-h2,     y-h2        }, // T
+            {x+w-h2,       y-h2        }, // TR
+            {x+w-h2,       y+h/2-h2    }, // R
+            {x+w-h2,       y+h-h2      }, // BR
+            {x+w/2-h2,     y+h-h2      }, // B
+            {x-h2,         y+h-h2      }, // BL
+            {x-h2,         y+h/2-h2    }, // L
+        };
     }
 
     private void showSinglePointCapture(nodes.WatchCaseNode.WatchZone zone, JButton btn, Window parentWin) {
@@ -1655,12 +1919,20 @@ public class NodeEditor extends JPanel {
         };
         glass.setOpaque(false); glass.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
         glass.setFocusable(true);
-        glass.addKeyListener(new KeyAdapter(){
-            public void keyPressed(KeyEvent e){
-                if(e.getKeyCode()==KeyEvent.VK_ESCAPE){
+        java.awt.KeyEventDispatcher kedS = e2 -> {
+            if (e2.getID()==KeyEvent.KEY_PRESSED && e2.getKeyCode()==KeyEvent.VK_ESCAPE) {
+                SwingUtilities.invokeLater(() -> {
                     overlay.dispose();
-                    if(parentWin!=null) SwingUtilities.invokeLater(()->{parentWin.setVisible(true);parentWin.toFront();});
-                }
+                    if(parentWin!=null) { parentWin.setVisible(true); parentWin.toFront(); }
+                });
+                return true;
+            }
+            return false;
+        };
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(kedS);
+        overlay.addWindowListener(new java.awt.event.WindowAdapter(){
+            public void windowClosed(java.awt.event.WindowEvent e){
+                KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(kedS);
             }
         });
         glass.addMouseListener(new MouseAdapter(){
@@ -1672,7 +1944,6 @@ public class NodeEditor extends JPanel {
             }
         });
         overlay.setContentPane(glass); overlay.setVisible(true);
-        SwingUtilities.invokeLater(glass::requestFocusInWindow);
     }
 
     private void addCaseRow(nodes.WatchCaseNode wc, nodes.WatchCaseNode.WatchCase wcase) {
