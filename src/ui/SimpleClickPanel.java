@@ -35,6 +35,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
     private JWindow        smartBar;
     private JLabel         barCoordsLabel, barPinCountLabel;
     private Color          pinRingColor    = new Color(255, 210, 0);
+    private int            currentPinType  = 0; // 0=left,1=right,2=middle — persists across pins
 
     // Hotkeys
     private int     startStopKey          = NativeKeyEvent.VC_F6;
@@ -167,15 +168,9 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         ringBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         ringBtn.addActionListener(e -> {
             Color[] presets = {
-                new Color(255,210,0),   // Yellow
-                new Color(255,80,80),   // Red
-                new Color(80,200,80),   // Green
-                new Color(80,140,255),  // Blue
-                new Color(255,140,0),   // Orange
-                new Color(200,80,255),  // Purple
-                new Color(0,220,220),   // Cyan
-                Color.WHITE,            // White
-                new Color(180,180,180)  // Gray
+                new Color(255,210,0), new Color(255,80,80), new Color(80,200,80),
+                new Color(80,140,255), new Color(255,140,0), new Color(200,80,255),
+                new Color(0,220,220), Color.WHITE, new Color(180,180,180)
             };
             JDialog picker = new JDialog((java.awt.Frame)null, "Pin Ring Color", true);
             picker.setUndecorated(true);
@@ -196,13 +191,15 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         });
         ringRow.add(ringLbl); ringRow.add(ringBtn);
 
+        // Columns: # X Y Clicks Sub-delay After-delay Type
         tableModel = new DefaultTableModel(
-            new String[]{"#","X","Y","Clicks","Sub-delay","After-delay"}, 0) {
+            new String[]{"#","X","Y","Clicks","Sub-delay","After-delay","Type"}, 0) {
             public boolean isCellEditable(int r, int c) { return c==1||c==2||c==3; }
             public Object getValueAt(int r, int c) {
                 Object v = super.getValueAt(r,c);
                 if ((c==4||c==5) && v instanceof Number)
                     return String.format("%.3f s", ((Number)v).longValue()/1000.0);
+                // c==6: return raw int — renderer handles display
                 return v;
             }
         };
@@ -215,10 +212,10 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         pointsTable.getTableHeader().setBackground(new Color(35,35,50));
         pointsTable.getTableHeader().setForeground(TEXT_DIM);
         pointsTable.getTableHeader().setFont(new Font("SansSerif",Font.BOLD,10));
-        int[] cw = {22,55,55,45,70,75};
+        int[] cw = {22,50,50,42,68,72,38};
         for (int i=0;i<cw.length;i++) pointsTable.getColumnModel().getColumn(i).setPreferredWidth(cw[i]);
 
-        // Delay columns — blue tint, clickable
+        // Delay columns renderer
         TableCellRenderer delayRenderer = new DefaultTableCellRenderer() {
             public Component getTableCellRendererComponent(JTable t, Object val, boolean sel, boolean foc, int r, int c) {
                 JLabel lbl = (JLabel)super.getTableCellRendererComponent(t,val,sel,foc,r,c);
@@ -231,22 +228,50 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         pointsTable.getColumnModel().getColumn(4).setCellRenderer(delayRenderer);
         pointsTable.getColumnModel().getColumn(5).setCellRenderer(delayRenderer);
 
-        // Click on delay cell → open interval picker
+        // Type column renderer — raw int → L/R/M
+        pointsTable.getColumnModel().getColumn(6).setCellRenderer(new DefaultTableCellRenderer() {
+            public Component getTableCellRendererComponent(JTable t, Object val, boolean sel, boolean foc, int r, int c) {
+                int typeInt = 0;
+                try { typeInt = ((Number)val).intValue(); } catch(Exception ignored){}
+                String display; Color fc;
+                switch(typeInt){
+                    case 1: display="R"; fc=new Color(220,80,80); break;
+                    case 2: display="M"; fc=new Color(80,200,120); break;
+                    default: display="L"; fc=new Color(80,140,255); break;
+                }
+                JLabel lbl = (JLabel) super.getTableCellRendererComponent(t,display,sel,foc,r,c);
+                lbl.setHorizontalAlignment(SwingConstants.CENTER);
+                lbl.setFont(new Font("SansSerif",Font.BOLD,11));
+                lbl.setBackground(sel ? new Color(50,80,140) : new Color(32,32,44));
+                lbl.setForeground(fc);
+                lbl.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                return lbl;
+            }
+        });
+
+        // Click on delay cell → interval picker; click on Type → cycle
         pointsTable.addMouseListener(new MouseAdapter(){
             public void mouseClicked(MouseEvent e){
                 int col=pointsTable.columnAtPoint(e.getPoint());
                 int row=pointsTable.rowAtPoint(e.getPoint());
-                if (row<0||(col!=4&&col!=5)) return;
-                Object cur = tableModel.getValueAt(row,col);
-                long currentMs=100;
-                try {
-                    if (cur instanceof Long) currentMs=(Long)cur;
-                    else if (cur instanceof Number) currentMs=((Number)cur).longValue();
-                    else { String s=cur.toString().replace(" s","").trim(); currentMs=(long)(Double.parseDouble(s)*1000); }
-                } catch(Exception ignored){}
-                String colName = col==4 ? "Sub-click delay" : "Delay after click";
-                long result = showIntervalPicker(colName, currentMs);
-                if (result>=0) { tableModel.setValueAt(result,row,col); }
+                if (row<0) return;
+                if (col==4||col==5) {
+                    Object cur = tableModel.getValueAt(row,col);
+                    long currentMs=100;
+                    try {
+                        if (cur instanceof Long) currentMs=(Long)cur;
+                        else if (cur instanceof Number) currentMs=((Number)cur).longValue();
+                        else { String s=cur.toString().replace(" s","").trim(); currentMs=(long)(Double.parseDouble(s)*1000); }
+                    } catch(Exception ignored){}
+                    String colName = col==4 ? "Sub-click delay" : "Delay after click";
+                    long result = showIntervalPicker(colName, currentMs);
+                    if (result>=0) { tableModel.setValueAt(result,row,col); }
+                } else if (col==6) {
+                    Object raw = tableModel.getValueAt(row, 6);
+                    int oldType = 0;
+                    try { oldType = ((Number)raw).intValue(); } catch(Exception ignored){}
+                    tableModel.setValueAt((oldType+1)%3, row, 6);
+                }
             }
         });
 
@@ -263,7 +288,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         });
 
         JScrollPane scroll = new JScrollPane(pointsTable);
-        scroll.setPreferredSize(new Dimension(300,120));
+        scroll.setPreferredSize(new Dimension(300,130));
         scroll.setBorder(BorderFactory.createLineBorder(BORDER_COL));
         scroll.getViewport().setBackground(new Color(32,32,44));
         scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
@@ -277,7 +302,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
 
         JPanel btns = new JPanel(new FlowLayout(FlowLayout.LEFT,6,6));
         btns.setBackground(PANEL_BG);
-        JButton smartPinBtn = dactionBtn("⊕ Smart Pin", ACCENT);
+        JButton smartPinBtn = dactionBtn("\u2295 Smart Pin", ACCENT);
         JButton addBtn      = dactionBtn("+ Add",       ACCENT);
         JButton remBtn      = dactionBtn("- Remove",    new Color(220,70,70));
         JButton clrBtn      = dactionBtn("Clear All",   new Color(120,120,150));
@@ -286,7 +311,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         addBtn.addActionListener(e -> {
             Dimension scr=Toolkit.getDefaultToolkit().getScreenSize();
             int row=tableModel.getRowCount();
-            tableModel.addRow(new Object[]{row+1, scr.width/2, scr.height/2, 1, 100L, 100L});
+            tableModel.addRow(new Object[]{row+1, scr.width/2, scr.height/2, 1, 100L, 100L, 0});
             refreshSmartInterval();
         });
         remBtn.addActionListener(e -> {
@@ -311,6 +336,29 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         return p;
     }
 
+    // Raw type helpers — bypass the display override in getValueAt
+    private String getRawType(int row) {
+        try {
+            java.lang.reflect.Field f = tableModel.getClass().getSuperclass().getDeclaredField("dataVector");
+            f.setAccessible(true);
+            java.util.Vector data = (java.util.Vector)f.get(tableModel);
+            java.util.Vector rowVec = (java.util.Vector)data.get(row);
+            Object v = rowVec.get(6);
+            if (v instanceof Number) return String.valueOf(((Number)v).intValue());
+        } catch(Exception ignored){}
+        return "0";
+    }
+
+    private void setRawType(int row, int type) {
+        try {
+            java.lang.reflect.Field f = tableModel.getClass().getSuperclass().getDeclaredField("dataVector");
+            f.setAccessible(true);
+            java.util.Vector data = (java.util.Vector)f.get(tableModel);
+            java.util.Vector rowVec = (java.util.Vector)data.get(row);
+            rowVec.set(6, type);
+        } catch(Exception ignored){}
+    }
+
     // ── Hotkey panel ──────────────────────────────────────────
     private JPanel buildHotkeyPanel() {
         JPanel p = darkPanel();
@@ -324,7 +372,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         smartPinKeyLabel.setForeground(TEXT_MAIN); smartPinKeyLabel.setFont(new Font("SansSerif",Font.PLAIN,12));
         JButton changeSSBtn  = dactionBtn("Change",            new Color(120,120,180));
         JButton changeSPBtn  = dactionBtn("Change",            new Color(120,120,180));
-        JButton smartPinBtn2 = dactionBtn("⊕ Enter Smart Pin", ACCENT);
+        JButton smartPinBtn2 = dactionBtn("\u2295 Enter Smart Pin", ACCENT);
         changeSSBtn.addActionListener(e  -> startListeningForKey(true));
         changeSPBtn.addActionListener(e  -> startListeningForKey(false));
         smartPinBtn2.addActionListener(e -> toggleSmartMode());
@@ -337,17 +385,41 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
     // ── Status + buttons ──────────────────────────────────────
     private JPanel buildStatusPanel() {
         JPanel p = darkPanel(); p.setLayout(new GridLayout(2,1,4,4)); p.setBorder(darkTitledBorder("Status"));
-        statusLabel=new JLabel("● Idle"); statusLabel.setFont(new Font("SansSerif",Font.BOLD,13)); statusLabel.setForeground(TEXT_DIM); statusLabel.setBorder(new EmptyBorder(4,10,0,0));
+        statusLabel=new JLabel("\u25cf Idle"); statusLabel.setFont(new Font("SansSerif",Font.BOLD,13)); statusLabel.setForeground(TEXT_DIM); statusLabel.setBorder(new EmptyBorder(4,10,0,0));
         clickCountLabel=new JLabel("Clicks: 0"); clickCountLabel.setFont(new Font("SansSerif",Font.PLAIN,12)); clickCountLabel.setForeground(TEXT_DIM); clickCountLabel.setBorder(new EmptyBorder(0,10,4,0));
         p.add(statusLabel); p.add(clickCountLabel); return p;
     }
 
     private JPanel buildButtons() {
         JPanel p = new JPanel(new FlowLayout(FlowLayout.CENTER,10,0)); p.setBackground(BG); p.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JButton startBtn=bigBtn("▶  Start",new Color(40,200,80),new Color(40,160,80));
-        JButton stopBtn =bigBtn("■  Stop", new Color(220,70,70), new Color(180,50,50));
+        JButton startBtn=bigBtn("\u25b6  Start",new Color(40,200,80),new Color(40,160,80));
+        JButton stopBtn =bigBtn("\u25a0  Stop", new Color(220,70,70), new Color(180,50,50));
         startBtn.addActionListener(e->startClicking()); stopBtn.addActionListener(e->stopClicking());
         p.add(startBtn); p.add(stopBtn); return p;
+    }
+
+    // ── Mouse widget — painted mouse shape ────────────────────
+    /** Paints a simple mouse icon. active: 0=left,1=right,2=middle */
+    private void paintMouseWidget(Graphics2D g2in, int x, int y, int w, int h, int active) {
+        Graphics2D g2 = (Graphics2D) g2in.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        Color colLeft   = (active==0) ? new Color(80,140,255) : new Color(55,55,75);
+        Color colRight  = (active==1) ? new Color(220,80,80)  : new Color(55,55,75);
+        Color colMiddle = (active==2) ? new Color(80,200,120) : new Color(55,55,75);
+        int bx=x+4, by=y+4, bw=w-8, bh=h-8, mx=x+w/2;
+        g2.setColor(new Color(30,30,45)); g2.fillRoundRect(bx,by,bw,bh,14,14);
+        g2.setClip(bx,by,bw/2,bh/2+6); g2.setColor(colLeft); g2.fillRoundRect(bx,by,bw,bh,14,14);
+        g2.setClip(mx,by,bw/2+2,bh/2+6); g2.setColor(colRight); g2.fillRoundRect(bx,by,bw,bh,14,14);
+        g2.setClip(null);
+        g2.setColor(new Color(15,15,25)); g2.setStroke(new BasicStroke(1.5f));
+        g2.drawLine(mx,by,mx,by+bh/2+2);
+        int swX=mx-3, swY=by+4;
+        g2.setColor(colMiddle); g2.fillRoundRect(swX,swY,6,12,4,4);
+        g2.setColor(new Color(15,15,25)); g2.setStroke(new BasicStroke(0.8f));
+        g2.drawRoundRect(swX,swY,6,12,4,4);
+        g2.setColor(new Color(100,100,130)); g2.setStroke(new BasicStroke(1.2f));
+        g2.drawRoundRect(bx,by,bw,bh,14,14);
+        g2.dispose();
     }
 
     // ── Smart pin mode ────────────────────────────────────────
@@ -365,39 +437,108 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
 
     private void showSmartBar() {
         smartBar=new JWindow(); smartBar.setAlwaysOnTop(true); smartBar.setBackground(new Color(0,0,0,0));
+
         JPanel bar = new JPanel() {
             protected void paintComponent(Graphics g) {
-                Graphics2D g2=(Graphics2D)g; g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                Graphics2D g2=(Graphics2D)g;
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
                 g2.setColor(new Color(15,15,22,240)); g2.fillRoundRect(0,0,getWidth(),getHeight(),18,18);
                 g2.setColor(new Color(80,140,255,200)); g2.fillRoundRect(0,0,getWidth(),3,4,4);
             }
         };
-        bar.setOpaque(false); bar.setLayout(new FlowLayout(FlowLayout.CENTER,10,7));
-        JLabel dragHandle=new JLabel("⠿"); dragHandle.setFont(new Font("SansSerif",Font.PLAIN,16)); dragHandle.setForeground(new Color(100,100,130)); dragHandle.setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+        bar.setOpaque(false); bar.setLayout(new FlowLayout(FlowLayout.CENTER,8,6));
+
         JLabel titleLbl=new JLabel("Smart Pin"); titleLbl.setFont(new Font("SansSerif",Font.BOLD,12)); titleLbl.setForeground(ACCENT);
         barPinCountLabel=new JLabel("Pins: "+smartPins.size()); barPinCountLabel.setFont(new Font("SansSerif",Font.PLAIN,11)); barPinCountLabel.setForeground(TEXT_DIM);
-        barCoordsLabel=new JLabel("X: ─── Y: ───"); barCoordsLabel.setFont(new Font("Monospaced",Font.BOLD,12)); barCoordsLabel.setForeground(new Color(80,220,120));
+        barCoordsLabel=new JLabel("X: \u2500\u2500\u2500 Y: \u2500\u2500\u2500"); 
+        barCoordsLabel.setFont(new Font("Monospaced",Font.BOLD,12)); 
+        barCoordsLabel.setForeground(new Color(80,220,120));
+        barCoordsLabel.setPreferredSize(new Dimension(130, 18));
+        barCoordsLabel.setHorizontalAlignment(SwingConstants.LEFT);
+
+        // ── Mouse widget panel ────────────────────────────────
+        int mw=52, mh=38;
+        JPanel mouseWidget = new JPanel(null) {
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                paintMouseWidget((Graphics2D)g, 0, 0, getWidth(), getHeight(), currentPinType);
+            }
+        };
+        mouseWidget.setPreferredSize(new Dimension(mw, mh));
+        mouseWidget.setOpaque(false);
+        mouseWidget.setToolTipText("Click left/right/scroll to select click type");
+        mouseWidget.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        mouseWidget.addMouseListener(new MouseAdapter(){
+            public void mouseClicked(MouseEvent e) {
+                int mx = mw/2;
+                int swX = mx-3, swY = 8;
+                // Scroll wheel zone
+                if (e.getX()>=swX-2 && e.getX()<=swX+8 && e.getY()>=swY && e.getY()<=swY+14) {
+                    currentPinType = 2;
+                } else if (e.getX() < mx) {
+                    currentPinType = 0; // left
+                } else {
+                    currentPinType = 1; // right
+                }
+                mouseWidget.repaint();
+            }
+        });
+
+        // Type labels
+        JLabel typeLbl = new JLabel() {
+            public void paint(Graphics g) {
+                super.paint(g);
+            }
+        };
+        // We'll use a live-updating label showing current type name
+        JLabel typeNameLbl = new JLabel(typeName(currentPinType));
+        typeNameLbl.setFont(new Font("SansSerif",Font.BOLD,10));
+        typeNameLbl.setForeground(typeColor(currentPinType));
+
+        // Update typeNameLbl when mouse widget clicked
+        mouseWidget.addMouseListener(new MouseAdapter(){
+            public void mouseClicked(MouseEvent e){
+                typeNameLbl.setText(typeName(currentPinType));
+                typeNameLbl.setForeground(typeColor(currentPinType));
+            }
+        });
+
         JButton addPinBtn=dactionBtn("+ Pin",ACCENT);
         addPinBtn.addActionListener(e -> {
             Dimension scr=Toolkit.getDefaultToolkit().getScreenSize();
-            addSmartPin(scr.width/2, scr.height/2);
+            addSmartPin(scr.width/2, scr.height/2, currentPinType);
         });
-        JButton doneBtn=dactionBtn("✓ Done",new Color(120,120,150)); doneBtn.addActionListener(e->toggleSmartMode());
-        bar.add(dragHandle); bar.add(titleLbl); bar.add(sep()); bar.add(barPinCountLabel); bar.add(sep()); bar.add(barCoordsLabel); bar.add(sep()); bar.add(addPinBtn); bar.add(doneBtn);
+        JButton doneBtn=dactionBtn("\u2713 Done",new Color(120,120,150)); doneBtn.addActionListener(e->toggleSmartMode());
+
+        bar.add(titleLbl); bar.add(sep()); bar.add(barPinCountLabel); bar.add(sep());
+        bar.add(barCoordsLabel); bar.add(sep());
+        bar.add(mouseWidget); bar.add(typeNameLbl);
+        bar.add(sep()); bar.add(addPinBtn); bar.add(doneBtn);
+
         int[] off={0,0};
         bar.addMouseListener(new MouseAdapter(){ public void mousePressed(MouseEvent e){off[0]=e.getX();off[1]=e.getY();}});
         bar.addMouseMotionListener(new MouseMotionAdapter(){ public void mouseDragged(MouseEvent e){ Point loc=smartBar.getLocationOnScreen(); smartBar.setLocation(loc.x+e.getX()-off[0],loc.y+e.getY()-off[1]); }});
         smartBar.setContentPane(bar); smartBar.pack();
+        smartBar.setSize(smartBar.getWidth() + 70, smartBar.getHeight());
         Dimension screen=Toolkit.getDefaultToolkit().getScreenSize(); smartBar.setLocation(screen.width/2-smartBar.getWidth()/2,18); smartBar.setVisible(true);
+
+        // Coords timer
         new Timer(50,e->{ if(!smartModeActive){((Timer)e.getSource()).stop();return;} Point p=MouseInfo.getPointerInfo().getLocation(); barCoordsLabel.setText("X: "+p.x+"  Y: "+p.y); }).start();
+    }
+
+    private String typeName(int t) {
+        switch(t){ case 1: return "Right"; case 2: return "Middle"; default: return "Left"; }
+    }
+    private Color typeColor(int t) {
+        switch(t){ case 1: return new Color(220,80,80); case 2: return new Color(80,200,120); default: return new Color(80,140,255); }
     }
 
     private void hideSmartBar() { if(smartBar!=null){smartBar.dispose();smartBar=null;} }
 
-    private void addSmartPin(int x, int y) {
+    private void addSmartPin(int x, int y, int btnType) {
         int row=tableModel.getRowCount(); long iv=getIntervalMs();
-        tableModel.addRow(new Object[]{row+1,x,y,1,iv,iv});
-        SmartPin pin=new SmartPin(x,y,row); smartPins.add(pin);
+        tableModel.addRow(new Object[]{row+1, x, y, 1, iv, iv, btnType});
+        SmartPin pin=new SmartPin(x, y, row, btnType); smartPins.add(pin);
         if (smartModeActive) { SwingUtilities.invokeLater(()->{ pin.show(); pin.win.toFront(); }); }
         if (barPinCountLabel!=null) barPinCountLabel.setText("Pins: "+smartPins.size());
         refreshSmartInterval();
@@ -405,13 +546,15 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
 
     private JLabel sep(){ JLabel s=new JLabel("|"); s.setForeground(new Color(60,60,80)); return s; }
 
-    // ── Smart pin widget — crosshair + ring ───────────────────
+    // ── Smart pin widget ──────────────────────────────────────
     class SmartPin {
         JWindow win;
-        int screenX, screenY, rowIndex;
+        int screenX, screenY, rowIndex, btnType;
         static final int PSZ = 44;
 
-        SmartPin(int x, int y, int row) { screenX=x; screenY=y; rowIndex=row; build(); }
+        SmartPin(int x, int y, int row, int btnType) {
+            screenX=x; screenY=y; rowIndex=row; this.btnType=btnType; build();
+        }
 
         void build() {
             win=new JWindow(); win.setAlwaysOnTop(true); win.setBackground(new Color(0,0,0,1));
@@ -449,8 +592,10 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
                     Graphics2D g2=(Graphics2D)g;
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
                     int cx=getWidth()/2, cy=getHeight()/2;
+                    // Ring color based on type
+                    Color rc = (btnType==1) ? new Color(220,80,80) : (btnType==2) ? new Color(80,200,120) : pinRingColor;
                     int ringR=10;
-                    g2.setColor(pinRingColor); g2.setStroke(new BasicStroke(2f));
+                    g2.setColor(rc); g2.setStroke(new BasicStroke(2f));
                     g2.drawOval(cx-ringR,cy-ringR,ringR*2,ringR*2);
                     g2.setColor(new Color(255,255,255,230)); g2.setStroke(new BasicStroke(1.5f));
                     int arm=8,gap=4;
@@ -464,6 +609,14 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
                         g2.setColor(new Color(0,0,0,160)); g2.fillOval(cx-6,cy-6,12,12);
                         g2.setColor(Color.WHITE); g2.drawString(lbl,cx-lw/2,cy+4);
                     }
+                    // Type badge bottom-right
+                    String tb = (btnType==1)?"R":(btnType==2)?"M":"L";
+                    Color tc = (btnType==1)?new Color(220,80,80):(btnType==2)?new Color(80,200,120):new Color(80,140,255);
+                    g2.setFont(new Font("SansSerif",Font.BOLD,8));
+                    g2.setColor(new Color(0,0,0,180)); g2.fillRoundRect(cx+5,cy+5,10,10,3,3);
+                    g2.setColor(tc);
+                    FontMetrics fm2=g2.getFontMetrics(); int tw=fm2.stringWidth(tb);
+                    g2.drawString(tb, cx+5+(10-tw)/2, cy+5+9);
                 }
             };
             panel.setPreferredSize(new Dimension(PSZ,PSZ));
@@ -483,7 +636,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         refreshSmartInterval();
     }
 
-    // ── Interval picker popup ─────────────────────────────────
+    // ── Interval picker ───────────────────────────────────────
     private long showIntervalPicker(String title, long currentMs) {
         int ivH=(int)(currentMs/3600000L), ivM=(int)((currentMs%3600000L)/60000L);
         int ivS=(int)((currentMs%60000L)/1000L), ivT=(int)((currentMs%1000L)/100L);
@@ -562,15 +715,23 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
     // ── Engine control ────────────────────────────────────────
     public void startClicking() {
         if (running) return;
-        running=true; clickCount=0; updateStatus("● Running",new Color(40,200,80));
+        running=true; clickCount=0; updateStatus("\u25cf Running",new Color(40,200,80));
         List<int[]> points=new ArrayList<>();
         for (int i=0;i<tableModel.getRowCount();i++) {
-            try { points.add(new int[]{
-                Integer.parseInt(tableModel.getValueAt(i,1).toString()),
-                Integer.parseInt(tableModel.getValueAt(i,2).toString()),
-                Integer.parseInt(tableModel.getValueAt(i,3).toString()),
-                cellToInt(tableModel.getValueAt(i,4)),
-                cellToInt(tableModel.getValueAt(i,5))});
+            try {
+                int btnType = 0;
+                try {
+                    Object tv = tableModel.getValueAt(i, 6);
+                    btnType = ((Number)tv).intValue();
+                } catch(Exception ignored){}
+                points.add(new int[]{
+                    Integer.parseInt(tableModel.getValueAt(i,1).toString()),
+                    Integer.parseInt(tableModel.getValueAt(i,2).toString()),
+                    Integer.parseInt(tableModel.getValueAt(i,3).toString()),
+                    cellToInt(tableModel.getValueAt(i,4)),
+                    cellToInt(tableModel.getValueAt(i,5)),
+                    btnType
+                });
             } catch(Exception ignored){}
         }
         long maxClicks; try{maxClicks=Long.parseLong(maxClicksField.getText().trim());}catch(Exception e){maxClicks=0;}
@@ -581,7 +742,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         new Thread(()->{ while(running&&engineThread.isAlive()){try{Thread.sleep(200);}catch(InterruptedException ignored){}} stopClicking(); }).start();
     }
 
-    public void stopClicking() { running=false; if(engine!=null)engine.stop(); SwingUtilities.invokeLater(()->updateStatus("● Stopped",new Color(200,60,60))); }
+    public void stopClicking() { running=false; if(engine!=null)engine.stop(); SwingUtilities.invokeLater(()->updateStatus("\u25cf Stopped",new Color(200,60,60))); }
 
     // ── Helpers ───────────────────────────────────────────────
     private static int cellToInt(Object val) {
@@ -607,7 +768,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         boolean active=false;
         for (int i=0;i<tableModel.getRowCount();i++) { try{if(Integer.parseInt(tableModel.getValueAt(i,3).toString())>1){active=true;break;}}catch(Exception ignored){} }
         if (intervalSpinnersPanel!=null) for (Component c:intervalSpinnersPanel.getComponents()) c.setEnabled(!active);
-        if (smartIntervalLabel!=null) { if(active){smartIntervalLabel.setText("⚡ Smart Interval active");smartIntervalLabel.setForeground(ACCENT);}else{smartIntervalLabel.setText("Smart Interval off — set Clicks > 1 to activate");smartIntervalLabel.setForeground(TEXT_DIM);} }
+        if (smartIntervalLabel!=null) { if(active){smartIntervalLabel.setText("\u26a1 Smart Interval active");smartIntervalLabel.setForeground(ACCENT);}else{smartIntervalLabel.setText("Smart Interval off \u2014 set Clicks > 1 to activate");smartIntervalLabel.setForeground(TEXT_DIM);} }
     }
 
     private void refreshRowNumbers(){ for(int i=0;i<tableModel.getRowCount();i++) tableModel.setValueAt(i+1,i,0); }

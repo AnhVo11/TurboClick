@@ -6,24 +6,24 @@ import java.util.List;
 
 /**
  * SimpleClickEngine — the core auto-clicker loop.
- * Used by both the Build Simple Click panel and the SimpleClickNode.
+ * Points array: {x, y, clicks, subDelayMs, afterDelayMs, btnType}
+ * btnType: 0=left, 1=right, 2=middle (optional 6th element, falls back to global mouseButton)
  */
 public class SimpleClickEngine implements Runnable {
 
-    private final List<int[]>      points;       // {x,y,clicks,subDelay,delayAfter}
+    private final List<int[]>      points;
     private final long             intervalMs;
     private final long             maxClicks;
-    private final int              mouseButton;
+    private final int              mouseButton;       // global fallback
     private final boolean          doubleClick;
     private final boolean          repeatUntilStopped;
     private final int              repeatTimes;
-    private final ExecutionContext ctx;          // nullable — used for ctx.isRunning()
+    private final ExecutionContext ctx;
 
     private volatile boolean stopped    = false;
     private volatile boolean wasStopped = false;
     private volatile long    clickCount = 0;
 
-    // Callbacks for UI updates
     public interface ClickCallback { void onClick(long total); }
     private ClickCallback clickCallback;
 
@@ -53,13 +53,24 @@ public class SimpleClickEngine implements Runnable {
         return true;
     }
 
+    /** Resolve button mask for a point — reads pt[5] if available, falls back to global */
+    private int btnMaskForPoint(int[] pt) {
+        int btn = (pt.length > 5) ? pt[5] : mouseButton;
+        switch (btn) {
+            case 1:  return InputEvent.BUTTON3_DOWN_MASK; // right
+            case 2:  return InputEvent.BUTTON2_DOWN_MASK; // middle
+            default: return InputEvent.BUTTON1_DOWN_MASK; // left
+        }
+    }
+
     @Override
     public void run() {
         try {
             Robot robot = new Robot();
-            int btn = mouseButton == 1 ? InputEvent.BUTTON3_DOWN_MASK
-                    : mouseButton == 2 ? InputEvent.BUTTON2_DOWN_MASK
-                    :                    InputEvent.BUTTON1_DOWN_MASK;
+            // Global btn used only when no points (cursor-position mode)
+            int globalBtn = mouseButton == 1 ? InputEvent.BUTTON3_DOWN_MASK
+                          : mouseButton == 2 ? InputEvent.BUTTON2_DOWN_MASK
+                          :                    InputEvent.BUTTON1_DOWN_MASK;
 
             int loopsDone = 0;
             outer:
@@ -72,6 +83,7 @@ public class SimpleClickEngine implements Runnable {
                 if (!points.isEmpty()) {
                     for (int[] pt : points) {
                         if (!isActive()) break outer;
+                        int btn = btnMaskForPoint(pt);
                         robot.mouseMove(pt[0], pt[1]);
                         Thread.sleep(40);
                         for (int ci = 0; ci < pt[2]; ci++) {
@@ -84,7 +96,7 @@ public class SimpleClickEngine implements Runnable {
                         sleepCountdown(pt[4]);
                     }
                 } else {
-                    doClick(robot, btn);
+                    doClick(robot, globalBtn);
                     clickCount++;
                     if (clickCallback != null) clickCallback.onClick(clickCount);
                     sleepCountdown((int) intervalMs);
@@ -92,9 +104,6 @@ public class SimpleClickEngine implements Runnable {
             }
         } catch (Exception ex) { ex.printStackTrace(); }
     }
-
-    private int lastMatchX = -1, lastMatchY = -1;
-    public void setLastMatch(int x, int y) { lastMatchX=x; lastMatchY=y; }
 
     private void doClick(Robot r, int btn) throws InterruptedException {
         r.mousePress(btn); r.mouseRelease(btn);

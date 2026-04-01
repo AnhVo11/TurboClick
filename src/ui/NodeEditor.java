@@ -615,7 +615,7 @@ public class NodeEditor extends JPanel {
         content.add(pinRow);
         final DefaultTableModel[] tmRef = {null};
 
-        String[] cols = {"#","X","Y","Clicks","Sub-delay","After-delay"};
+        String[] cols = {"#","X","Y","Clicks","Sub-delay","After-delay","Type"};
         DefaultTableModel tm = new DefaultTableModel(cols, 0) {
             public boolean isCellEditable(int r, int c) { return c==1||c==2||c==3; }
             public Object getValueAt(int r, int c) {
@@ -624,13 +624,15 @@ public class NodeEditor extends JPanel {
                     long ms = ((Number)v).longValue();
                     return String.format("%.3f s", ms/1000.0);
                 }
+                // c==6: return raw int so renderer and reflection both see the same thing
                 return v;
             }
         };
         java.util.List<int[]> pts = getPointsField();
         for (int i = 0; i < pts.size(); i++) {
             int[] p = pts.get(i);
-            tm.addRow(new Object[]{i+1, p[0], p[1], p[2], (long)p[3], (long)p[4]});
+            int btnT = p.length > 5 ? p[5] : 0;
+            tm.addRow(new Object[]{i+1, p[0], p[1], p[2], (long)p[3], (long)p[4], btnT});
         }
 
         JTable tbl = new JTable(tm);
@@ -641,7 +643,7 @@ public class NodeEditor extends JPanel {
         tbl.getTableHeader().setBackground(new Color(35,35,50));
         tbl.getTableHeader().setForeground(new Color(120,120,150));
         tbl.getTableHeader().setFont(new Font("SansSerif",Font.BOLD,9));
-        int[] cw = {18,44,44,38,65,65};
+        int[] cw = {18,40,40,36,62,62,30};
         for (int i=0;i<cw.length;i++) tbl.getColumnModel().getColumn(i).setPreferredWidth(cw[i]);
 
         javax.swing.table.TableCellRenderer delayRenderer = new javax.swing.table.DefaultTableCellRenderer() {
@@ -656,6 +658,27 @@ public class NodeEditor extends JPanel {
         };
         tbl.getColumnModel().getColumn(4).setCellRenderer(delayRenderer);
         tbl.getColumnModel().getColumn(5).setCellRenderer(delayRenderer);
+        // Type column renderer — reads raw int, displays L/R/M
+        tbl.getColumnModel().getColumn(6).setCellRenderer(new javax.swing.table.DefaultTableCellRenderer() {
+            public java.awt.Component getTableCellRendererComponent(JTable t, Object val,
+                    boolean sel, boolean foc, int row, int col) {
+                int typeInt = 0;
+                try { typeInt = ((Number)val).intValue(); } catch(Exception ignored){}
+                String display; Color fc;
+                switch(typeInt){
+                    case 1: display="R"; fc=new Color(220,80,80); break;
+                    case 2: display="M"; fc=new Color(80,200,120); break;
+                    default: display="L"; fc=new Color(80,140,255); break;
+                }
+                JLabel lbl = (JLabel) super.getTableCellRendererComponent(t,display,sel,foc,row,col);
+                lbl.setHorizontalAlignment(SwingConstants.CENTER);
+                lbl.setFont(new Font("SansSerif",Font.BOLD,11));
+                lbl.setBackground(sel ? new Color(50,80,140) : new Color(32,32,44));
+                lbl.setForeground(fc);
+                lbl.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                return lbl;
+            }
+        });
         tm.addTableModelListener(e -> syncPointsToNode(tm));
         tmRef[0] = tm;
 
@@ -664,17 +687,25 @@ public class NodeEditor extends JPanel {
                 if (e.getClickCount()<1) return;
                 int col = tbl.columnAtPoint(e.getPoint());
                 int row = tbl.rowAtPoint(e.getPoint());
-                if (row<0||(col!=4&&col!=5)) return;
-                Object cur = tm.getValueAt(row, col);
-                long currentMs = 100;
-                try {
-                    if (cur instanceof Long) currentMs = (Long)cur;
-                    else if (cur instanceof Number) currentMs = ((Number)cur).longValue();
-                    else { String s = cur.toString().replace(" s","").trim(); currentMs = (long)(Double.parseDouble(s)*1000); }
-                } catch(Exception ignored){}
-                String colName = col==4 ? "Sub-click delay" : "Delay after click";
-                long result = showIntervalPicker(colName, currentMs);
-                if (result >= 0) { tm.setValueAt(result, row, col); syncPointsToNode(tm); }
+                if (row<0) return;
+                if (col==4||col==5) {
+                    Object cur = tm.getValueAt(row, col);
+                    long currentMs = 100;
+                    try {
+                        if (cur instanceof Long) currentMs = (Long)cur;
+                        else if (cur instanceof Number) currentMs = ((Number)cur).longValue();
+                        else { String s = cur.toString().replace(" s","").trim(); currentMs = (long)(Double.parseDouble(s)*1000); }
+                    } catch(Exception ignored){}
+                    String colName = col==4 ? "Sub-click delay" : "Delay after click";
+                    long result = showIntervalPicker(colName, currentMs);
+                    if (result >= 0) { tm.setValueAt(result, row, col); syncPointsToNode(tm); }
+                } else if (col==6) {
+                    Object raw = tm.getValueAt(row, 6);
+                    int oldType = 0;
+                    try { oldType = ((Number)raw).intValue(); } catch(Exception ignored){}
+                    tm.setValueAt((oldType+1)%3, row, 6);
+                    syncPointsToNode(tm);
+                }
             }
         });
 
@@ -714,7 +745,7 @@ public class NodeEditor extends JPanel {
 
         addBtn.addActionListener(e -> {
             Point mouse = MouseInfo.getPointerInfo().getLocation();
-            tm.addRow(new Object[]{tm.getRowCount()+1, mouse.x, mouse.y, 1, 100L, 100L});
+            tm.addRow(new Object[]{tm.getRowCount()+1, mouse.x, mouse.y, 1, 100L, 100L, 0});
             syncPointsToNode(tm);
         });
         remBtn.addActionListener(e -> {
@@ -1029,6 +1060,9 @@ public class NodeEditor extends JPanel {
         smartBar.setBackground(new Color(0,0,0,0));
         smartBar.setFocusableWindowState(true);
 
+        // Per-session current pin type — starts at Left
+        int[] sessionPinType = {0};
+
         JPanel bar = new JPanel() {
             protected void paintComponent(Graphics g) {
                 Graphics2D g2=(Graphics2D)g;
@@ -1038,7 +1072,7 @@ public class NodeEditor extends JPanel {
             }
         };
         bar.setOpaque(false);
-        bar.setLayout(new FlowLayout(FlowLayout.CENTER,10,7));
+        bar.setLayout(new FlowLayout(FlowLayout.CENTER,8,6));
 
         JLabel titleLbl = new JLabel("Smart Pin");
         titleLbl.setFont(new Font("SansSerif",Font.BOLD,12));
@@ -1051,6 +1085,40 @@ public class NodeEditor extends JPanel {
         JLabel coordsLbl = new JLabel("X: \u2500\u2500\u2500 Y: \u2500\u2500\u2500");
         coordsLbl.setFont(new Font("Monospaced",Font.BOLD,12));
         coordsLbl.setForeground(new Color(80,220,120));
+        coordsLbl.setPreferredSize(new Dimension(130, 18));
+        coordsLbl.setHorizontalAlignment(SwingConstants.LEFT);
+
+        // Mouse widget
+        int mw=52, mh=38;
+        JPanel mouseWidget = new JPanel(null) {
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                paintMouseWidget((Graphics2D)g, 0, 0, getWidth(), getHeight(), sessionPinType[0]);
+            }
+        };
+        mouseWidget.setPreferredSize(new Dimension(mw, mh));
+        mouseWidget.setOpaque(false);
+        mouseWidget.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JLabel typeNameLbl = new JLabel(pinTypeName(sessionPinType[0]));
+        typeNameLbl.setFont(new Font("SansSerif",Font.BOLD,10));
+        typeNameLbl.setForeground(pinTypeColor(sessionPinType[0]));
+
+        mouseWidget.addMouseListener(new MouseAdapter(){
+            public void mouseClicked(MouseEvent e){
+                int mx2 = mw/2;
+                if (e.getX()>=mx2-5 && e.getX()<=mx2+5 && e.getY()>=6 && e.getY()<=20) {
+                    sessionPinType[0]=2;
+                } else if (e.getX() < mx2) {
+                    sessionPinType[0]=0;
+                } else {
+                    sessionPinType[0]=1;
+                }
+                mouseWidget.repaint();
+                typeNameLbl.setText(pinTypeName(sessionPinType[0]));
+                typeNameLbl.setForeground(pinTypeColor(sessionPinType[0]));
+            }
+        });
 
         JButton addPinBtn = smartBarBtn("+ Pin", new Color(50,100,180));
         JButton doneBtn   = smartBarBtn("\u2713 Done", new Color(60,60,80));
@@ -1058,9 +1126,12 @@ public class NodeEditor extends JPanel {
         JLabel s1=new JLabel("|"); s1.setForeground(new Color(60,60,80));
         JLabel s2=new JLabel("|"); s2.setForeground(new Color(60,60,80));
         JLabel s3=new JLabel("|"); s3.setForeground(new Color(60,60,80));
+        JLabel s4=new JLabel("|"); s4.setForeground(new Color(60,60,80));
 
         bar.add(titleLbl); bar.add(s1); bar.add(pinCountLbl);
-        bar.add(s2); bar.add(coordsLbl); bar.add(s3); bar.add(addPinBtn); bar.add(doneBtn);
+        bar.add(s2); bar.add(coordsLbl);
+        bar.add(s3); bar.add(mouseWidget); bar.add(typeNameLbl);
+        bar.add(s4); bar.add(addPinBtn); bar.add(doneBtn);
 
         int[] off={0,0};
         bar.addMouseListener(new MouseAdapter(){ public void mousePressed(MouseEvent e){ off[0]=e.getX(); off[1]=e.getY(); }});
@@ -1073,6 +1144,7 @@ public class NodeEditor extends JPanel {
 
         smartBar.setContentPane(bar);
         smartBar.pack();
+        smartBar.setSize(smartBar.getWidth() + 70, smartBar.getHeight());
         smartBar.setLocation(screen.width/2-smartBar.getWidth()/2, 18);
         smartBar.setVisible(true);
 
@@ -1100,7 +1172,7 @@ public class NodeEditor extends JPanel {
             Dimension scr = Toolkit.getDefaultToolkit().getScreenSize();
             int px = scr.width/2, py = scr.height/2;
             int row = tm.getRowCount();
-            tm.addRow(new Object[]{row+1, px, py, 1, 100, 100});
+            tm.addRow(new Object[]{row+1, px, py, 1, 100, 100, sessionPinType[0]});
             syncPointsToNode(tm);
             EditorPin ep = new EditorPin(px, py, row, tm);
             pins.add(ep);
@@ -1202,6 +1274,41 @@ public class NodeEditor extends JPanel {
 
         void show()    { win.setVisible(true); }
         void dispose() { win.dispose(); }
+    }
+
+    private void paintMouseWidget(Graphics2D g2in, int x, int y, int w, int h, int active) {
+        // Use a copy so clip/stroke changes never leak into parent
+        Graphics2D g2 = (Graphics2D) g2in.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        Color colLeft   = (active==0) ? new Color(80,140,255) : new Color(55,55,75);
+        Color colRight  = (active==1) ? new Color(220,80,80)  : new Color(55,55,75);
+        Color colMiddle = (active==2) ? new Color(80,200,120) : new Color(55,55,75);
+        int bx=x+4, by=y+4, bw=w-8, bh=h-8, mx=x+w/2;
+        g2.setColor(new Color(30,30,45)); g2.fillRoundRect(bx,by,bw,bh,14,14);
+        // Left half
+        g2.setClip(bx,by,bw/2,bh/2+6); g2.setColor(colLeft); g2.fillRoundRect(bx,by,bw,bh,14,14);
+        // Right half
+        g2.setClip(mx,by,bw/2+2,bh/2+6); g2.setColor(colRight); g2.fillRoundRect(bx,by,bw,bh,14,14);
+        g2.setClip(null);
+        // Divider
+        g2.setColor(new Color(15,15,25)); g2.setStroke(new BasicStroke(1.5f));
+        g2.drawLine(mx,by,mx,by+bh/2+2);
+        // Scroll wheel
+        int swX=mx-3, swY=by+4;
+        g2.setColor(colMiddle); g2.fillRoundRect(swX,swY,6,12,4,4);
+        g2.setColor(new Color(15,15,25)); g2.setStroke(new BasicStroke(0.8f));
+        g2.drawRoundRect(swX,swY,6,12,4,4);
+        // Outline
+        g2.setColor(new Color(100,100,130)); g2.setStroke(new BasicStroke(1.2f));
+        g2.drawRoundRect(bx,by,bw,bh,14,14);
+        g2.dispose();
+    }
+
+    private String pinTypeName(int t) {
+        switch(t){ case 1: return "Right"; case 2: return "Middle"; default: return "Left"; }
+    }
+    private Color pinTypeColor(int t) {
+        switch(t){ case 1: return new Color(220,80,80); case 2: return new Color(80,200,120); default: return new Color(80,140,255); }
     }
 
     private JButton smartBarBtn(String text, Color bg) {
@@ -1394,14 +1501,47 @@ public class NodeEditor extends JPanel {
         java.util.List<int[]> pts = new java.util.ArrayList<>();
         for (int i=0;i<tm.getRowCount();i++) {
             try {
+                int btnT = 0;
+                if (tm.getColumnCount() > 6) {
+                    Object tv = tm.getValueAt(i, 6);
+                    try { btnT = ((Number)tv).intValue(); } catch(Exception ignored){}
+                }
                 pts.add(new int[]{
                     cellToInt(tm.getValueAt(i,1)), cellToInt(tm.getValueAt(i,2)),
                     cellToInt(tm.getValueAt(i,3)), cellToInt(tm.getValueAt(i,4)),
-                    cellToInt(tm.getValueAt(i,5))
+                    cellToInt(tm.getValueAt(i,5)), btnT
                 });
             } catch (Exception e) { e.printStackTrace(); }
         }
         return pts;
+    }
+
+    /** Read raw int from table model bypassing getValueAt override */
+    private int getRawIntFromTm(DefaultTableModel tm, int row, int col) {
+        try {
+            java.lang.reflect.Field f = tm.getClass().getSuperclass().getDeclaredField("dataVector");
+            f.setAccessible(true);
+            java.util.Vector data = (java.util.Vector)f.get(tm);
+            if (row >= data.size()) return 0;
+            java.util.Vector rowVec = (java.util.Vector)data.get(row);
+            if (col >= rowVec.size()) return 0;
+            Object v = rowVec.get(col);
+            if (v instanceof Number) return ((Number)v).intValue();
+        } catch(Exception ignored){}
+        return 0;
+    }
+
+    /** Write raw int to table model bypassing setValueAt display logic */
+    private void setRawIntInTm(DefaultTableModel tm, int row, int col, int val) {
+        try {
+            java.lang.reflect.Field f = tm.getClass().getSuperclass().getDeclaredField("dataVector");
+            f.setAccessible(true);
+            java.util.Vector data = (java.util.Vector)f.get(tm);
+            if (row >= data.size()) return;
+            java.util.Vector rowVec = (java.util.Vector)data.get(row);
+            if (col >= rowVec.size()) return;
+            rowVec.set(col, val);
+        } catch(Exception ignored){}
     }
 
     // =========================================================
