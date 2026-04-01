@@ -668,6 +668,7 @@ public class NodeEditor extends JPanel {
                 switch(typeInt){
                     case 1: display="R"; fc=new Color(220,80,80); break;
                     case 2: display="M"; fc=new Color(80,200,120); break;
+                    case 3: display="D"; fc=new Color(255,140,40); break;
                     default: display="L"; fc=new Color(80,140,255); break;
                 }
                 JLabel lbl = (JLabel) super.getTableCellRendererComponent(t,display,sel,foc,row,col);
@@ -1089,7 +1090,7 @@ public class NodeEditor extends JPanel {
         coordsLbl.setHorizontalAlignment(SwingConstants.LEFT);
 
         // Mouse widget
-        int mw=52, mh=38;
+        int mw=56, mh=48;
         JPanel mouseWidget = new JPanel(null) {
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
@@ -1103,16 +1104,22 @@ public class NodeEditor extends JPanel {
         JLabel typeNameLbl = new JLabel(pinTypeName(sessionPinType[0]));
         typeNameLbl.setFont(new Font("SansSerif",Font.BOLD,10));
         typeNameLbl.setForeground(pinTypeColor(sessionPinType[0]));
+        typeNameLbl.setPreferredSize(new Dimension(60, 18));
+        typeNameLbl.setHorizontalAlignment(SwingConstants.LEFT);
 
         mouseWidget.addMouseListener(new MouseAdapter(){
             public void mouseClicked(MouseEvent e){
                 int mx2 = mw/2;
-                if (e.getX()>=mx2-5 && e.getX()<=mx2+5 && e.getY()>=6 && e.getY()<=20) {
-                    sessionPinType[0]=2;
+                int topH = (mh-8)/2 + 4; // boundary between top and bottom halves
+                // Scroll wheel zone — top half center
+                if (e.getX()>=mx2-6 && e.getX()<=mx2+6 && e.getY()>=4 && e.getY()<=topH-2) {
+                    sessionPinType[0]=2; // middle
+                } else if (e.getY() >= topH) {
+                    sessionPinType[0]=3; // drag — bottom half
                 } else if (e.getX() < mx2) {
-                    sessionPinType[0]=0;
+                    sessionPinType[0]=0; // left
                 } else {
-                    sessionPinType[0]=1;
+                    sessionPinType[0]=1; // right
                 }
                 mouseWidget.repaint();
                 typeNameLbl.setText(pinTypeName(sessionPinType[0]));
@@ -1277,27 +1284,52 @@ public class NodeEditor extends JPanel {
     }
 
     private void paintMouseWidget(Graphics2D g2in, int x, int y, int w, int h, int active) {
-        // Use a copy so clip/stroke changes never leak into parent
         Graphics2D g2 = (Graphics2D) g2in.create();
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         Color colLeft   = (active==0) ? new Color(80,140,255) : new Color(55,55,75);
         Color colRight  = (active==1) ? new Color(220,80,80)  : new Color(55,55,75);
         Color colMiddle = (active==2) ? new Color(80,200,120) : new Color(55,55,75);
+        Color colDrag   = (active==3) ? new Color(255,140,40) : new Color(55,55,75);
         int bx=x+4, by=y+4, bw=w-8, bh=h-8, mx=x+w/2;
+        int topH = bh/2;   // top half height (buttons area)
+
+        // Body background
         g2.setColor(new Color(30,30,45)); g2.fillRoundRect(bx,by,bw,bh,14,14);
-        // Left half
-        g2.setClip(bx,by,bw/2,bh/2+6); g2.setColor(colLeft); g2.fillRoundRect(bx,by,bw,bh,14,14);
-        // Right half
-        g2.setClip(mx,by,bw/2+2,bh/2+6); g2.setColor(colRight); g2.fillRoundRect(bx,by,bw,bh,14,14);
+
+        // Left button (top-left half)
+        g2.setClip(bx, by, bw/2, topH+2);
+        g2.setColor(colLeft); g2.fillRoundRect(bx,by,bw,bh,14,14);
+
+        // Right button (top-right half)
+        g2.setClip(mx, by, bw/2+2, topH+2);
+        g2.setColor(colRight); g2.fillRoundRect(bx,by,bw,bh,14,14);
+
+        // Drag zone — bottom half
+        g2.setClip(bx, by+topH, bw, bh-topH+2);
+        g2.setColor(colDrag); g2.fillRoundRect(bx,by,bw,bh,14,14);
+
         g2.setClip(null);
-        // Divider
+
+        // Horizontal divider between top buttons and drag zone
         g2.setColor(new Color(15,15,25)); g2.setStroke(new BasicStroke(1.5f));
-        g2.drawLine(mx,by,mx,by+bh/2+2);
-        // Scroll wheel
-        int swX=mx-3, swY=by+4;
-        g2.setColor(colMiddle); g2.fillRoundRect(swX,swY,6,12,4,4);
+        g2.drawLine(bx+2, by+topH, bx+bw-2, by+topH);
+
+        // Vertical divider between left and right buttons
+        g2.drawLine(mx, by, mx, by+topH);
+
+        // Scroll wheel — bigger
+        int swW=8, swH=16, swX=mx-swW/2, swY=by+4;
+        g2.setColor(colMiddle); g2.fillRoundRect(swX,swY,swW,swH,5,5);
         g2.setColor(new Color(15,15,25)); g2.setStroke(new BasicStroke(0.8f));
-        g2.drawRoundRect(swX,swY,6,12,4,4);
+        g2.drawRoundRect(swX,swY,swW,swH,5,5);
+
+        // Drag label in bottom zone
+        g2.setFont(new Font("SansSerif",Font.BOLD,8));
+        g2.setColor(active==3 ? Color.WHITE : new Color(90,90,110));
+        String dragTxt = "\u2194"; // ↔
+        FontMetrics fm = g2.getFontMetrics();
+        g2.drawString(dragTxt, mx - fm.stringWidth(dragTxt)/2, by+topH+(bh-topH)/2+fm.getAscent()/2-1);
+
         // Outline
         g2.setColor(new Color(100,100,130)); g2.setStroke(new BasicStroke(1.2f));
         g2.drawRoundRect(bx,by,bw,bh,14,14);
@@ -1305,10 +1337,10 @@ public class NodeEditor extends JPanel {
     }
 
     private String pinTypeName(int t) {
-        switch(t){ case 1: return "Right"; case 2: return "Middle"; default: return "Left"; }
+        switch(t){ case 1: return "Right"; case 2: return "Middle"; case 3: return "Drag"; default: return "Left"; }
     }
     private Color pinTypeColor(int t) {
-        switch(t){ case 1: return new Color(220,80,80); case 2: return new Color(80,200,120); default: return new Color(80,140,255); }
+        switch(t){ case 1: return new Color(220,80,80); case 2: return new Color(80,200,120); case 3: return new Color(255,140,40); default: return new Color(80,140,255); }
     }
 
     private JButton smartBarBtn(String text, Color bg) {

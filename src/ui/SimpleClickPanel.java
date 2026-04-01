@@ -33,6 +33,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
     private boolean        smartModeActive = false;
     private List<SmartPin> smartPins       = new ArrayList<>();
     private JWindow        smartBar;
+    private JWindow        dragLineOverlay;
     private JLabel         barCoordsLabel, barPinCountLabel;
     private Color          pinRingColor    = new Color(255, 210, 0);
     private int            currentPinType  = 0; // 0=left,1=right,2=middle — persists across pins
@@ -156,41 +157,6 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         p.setLayout(new BorderLayout(6,6));
         p.setBorder(darkTitledBorder("Click Points  (empty = click at cursor)"));
 
-        // Ring color row
-        JPanel ringRow = new JPanel(new FlowLayout(FlowLayout.LEFT,6,4));
-        ringRow.setBackground(PANEL_BG);
-        JLabel ringLbl = new JLabel("Pin ring:");
-        ringLbl.setForeground(TEXT_DIM); ringLbl.setFont(new Font("SansSerif",Font.PLAIN,10));
-        JButton ringBtn = new JButton();
-        ringBtn.setBackground(pinRingColor); ringBtn.setPreferredSize(new Dimension(26,16));
-        ringBtn.setBorder(BorderFactory.createLineBorder(new Color(80,80,100),1));
-        ringBtn.setOpaque(true); ringBtn.setFocusPainted(false);
-        ringBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        ringBtn.addActionListener(e -> {
-            Color[] presets = {
-                new Color(255,210,0), new Color(255,80,80), new Color(80,200,80),
-                new Color(80,140,255), new Color(255,140,0), new Color(200,80,255),
-                new Color(0,220,220), Color.WHITE, new Color(180,180,180)
-            };
-            JDialog picker = new JDialog((java.awt.Frame)null, "Pin Ring Color", true);
-            picker.setUndecorated(true);
-            picker.getContentPane().setBackground(new Color(28,28,38));
-            JPanel grid = new JPanel(new GridLayout(1,9,4,0));
-            grid.setBackground(new Color(28,28,38)); grid.setBorder(BorderFactory.createEmptyBorder(8,8,8,8));
-            for (Color col : presets) {
-                JButton swatch = new JButton();
-                swatch.setPreferredSize(new Dimension(22,22));
-                swatch.setBackground(col); swatch.setOpaque(true); swatch.setBorderPainted(false); swatch.setFocusPainted(false);
-                swatch.setBorder(BorderFactory.createLineBorder(new Color(80,80,100),1));
-                swatch.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-                swatch.addActionListener(ae -> { pinRingColor=col; ringBtn.setBackground(col); picker.dispose(); });
-                grid.add(swatch);
-            }
-            picker.add(grid); picker.pack();
-            picker.setLocationRelativeTo(ringBtn); picker.setVisible(true);
-        });
-        ringRow.add(ringLbl); ringRow.add(ringBtn);
-
         // Columns: # X Y Clicks Sub-delay After-delay Type
         tableModel = new DefaultTableModel(
             new String[]{"#","X","Y","Clicks","Sub-delay","After-delay","Type"}, 0) {
@@ -237,6 +203,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
                 switch(typeInt){
                     case 1: display="R"; fc=new Color(220,80,80); break;
                     case 2: display="M"; fc=new Color(80,200,120); break;
+                    case 3: display="D"; fc=new Color(255,140,40); break;
                     default: display="L"; fc=new Color(80,140,255); break;
                 }
                 JLabel lbl = (JLabel) super.getTableCellRendererComponent(t,display,sel,foc,r,c);
@@ -331,7 +298,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         btns.add(smartPinBtn); btns.add(addBtn); btns.add(remBtn); btns.add(clrBtn);
 
         JPanel top = new JPanel(new BorderLayout());
-        top.setBackground(PANEL_BG); top.add(ringRow, BorderLayout.NORTH); top.add(scroll, BorderLayout.CENTER);
+        top.setBackground(PANEL_BG); top.add(scroll, BorderLayout.CENTER);
         p.add(top, BorderLayout.CENTER); p.add(btns, BorderLayout.SOUTH);
         return p;
     }
@@ -406,17 +373,34 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         Color colLeft   = (active==0) ? new Color(80,140,255) : new Color(55,55,75);
         Color colRight  = (active==1) ? new Color(220,80,80)  : new Color(55,55,75);
         Color colMiddle = (active==2) ? new Color(80,200,120) : new Color(55,55,75);
+        Color colDrag   = (active==3) ? new Color(255,140,40) : new Color(55,55,75);
         int bx=x+4, by=y+4, bw=w-8, bh=h-8, mx=x+w/2;
+        int topH = bh/2;
+        // Body
         g2.setColor(new Color(30,30,45)); g2.fillRoundRect(bx,by,bw,bh,14,14);
-        g2.setClip(bx,by,bw/2,bh/2+6); g2.setColor(colLeft); g2.fillRoundRect(bx,by,bw,bh,14,14);
-        g2.setClip(mx,by,bw/2+2,bh/2+6); g2.setColor(colRight); g2.fillRoundRect(bx,by,bw,bh,14,14);
+        // Left button
+        g2.setClip(bx,by,bw/2,topH+2); g2.setColor(colLeft); g2.fillRoundRect(bx,by,bw,bh,14,14);
+        // Right button
+        g2.setClip(mx,by,bw/2+2,topH+2); g2.setColor(colRight); g2.fillRoundRect(bx,by,bw,bh,14,14);
+        // Drag zone bottom
+        g2.setClip(bx,by+topH,bw,bh-topH+2); g2.setColor(colDrag); g2.fillRoundRect(bx,by,bw,bh,14,14);
         g2.setClip(null);
+        // Dividers
         g2.setColor(new Color(15,15,25)); g2.setStroke(new BasicStroke(1.5f));
-        g2.drawLine(mx,by,mx,by+bh/2+2);
-        int swX=mx-3, swY=by+4;
-        g2.setColor(colMiddle); g2.fillRoundRect(swX,swY,6,12,4,4);
+        g2.drawLine(bx+2,by+topH,bx+bw-2,by+topH);
+        g2.drawLine(mx,by,mx,by+topH);
+        // Scroll wheel — bigger
+        int swW=8, swH=16, swX=mx-swW/2, swY=by+4;
+        g2.setColor(colMiddle); g2.fillRoundRect(swX,swY,swW,swH,5,5);
         g2.setColor(new Color(15,15,25)); g2.setStroke(new BasicStroke(0.8f));
-        g2.drawRoundRect(swX,swY,6,12,4,4);
+        g2.drawRoundRect(swX,swY,swW,swH,5,5);
+        // Drag label
+        g2.setFont(new Font("SansSerif",Font.BOLD,8));
+        g2.setColor(active==3 ? Color.WHITE : new Color(90,90,110));
+        String dragTxt = "\u2194";
+        FontMetrics fm=g2.getFontMetrics();
+        g2.drawString(dragTxt, mx-fm.stringWidth(dragTxt)/2, by+topH+(bh-topH)/2+fm.getAscent()/2-1);
+        // Outline
         g2.setColor(new Color(100,100,130)); g2.setStroke(new BasicStroke(1.2f));
         g2.drawRoundRect(bx,by,bw,bh,14,14);
         g2.dispose();
@@ -428,11 +412,64 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         if (smartModeActive) {
             if (parentWindow==null) parentWindow=SwingUtilities.getWindowAncestor(this);
             if (parentWindow!=null) parentWindow.setVisible(false);
+            showDragLineOverlay();
             showSmartBar(); for (SmartPin p:smartPins) p.show();
         } else {
+            hideDragLineOverlay();
             hideSmartBar(); for (SmartPin p:smartPins) p.hide();
             if (parentWindow!=null) { parentWindow.setVisible(true); parentWindow.toFront(); }
         }
+    }
+
+    private void showDragLineOverlay() {
+        if (dragLineOverlay!=null) { dragLineOverlay.dispose(); }
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        dragLineOverlay = new JWindow();
+        dragLineOverlay.setType(Window.Type.POPUP);   // POPUP type doesn't intercept mouse on macOS
+        dragLineOverlay.setAlwaysOnTop(false);
+        dragLineOverlay.setBackground(new Color(0,0,0,0));
+        dragLineOverlay.setFocusableWindowState(false);
+        dragLineOverlay.setEnabled(false);  // prevents ALL mouse interception on macOS
+        dragLineOverlay.setBounds(0,0,screen.width,screen.height);
+
+        JPanel linePanel = new JPanel() {
+            { setOpaque(false); }
+            // Return false so ALL mouse events pass through to windows beneath
+            public boolean contains(int x, int y) { return false; }
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D)((Graphics2D)g).create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                for (SmartPin pin : smartPins) {
+                    if (pin instanceof DragPin) {
+                        DragPin dp = (DragPin)pin;
+                        int sx=dp.screenX, sy=dp.screenY, ex=dp.endX, ey=dp.endY;
+                        // Dashed orange line
+                        float[] dash={10f,5f};
+                        g2.setColor(new Color(255,140,40));
+                        g2.setStroke(new BasicStroke(2.5f,BasicStroke.CAP_ROUND,BasicStroke.JOIN_ROUND,1f,dash,0f));
+                        g2.drawLine(sx,sy,ex,ey);
+                        // Arrowhead at end
+                        g2.setStroke(new BasicStroke(2f));
+                        g2.setColor(new Color(255,140,40));
+                        double angle=Math.atan2(ey-sy,ex-sx); int sz=12;
+                        int ax1=(int)(ex-sz*Math.cos(angle-0.4)),ay1=(int)(ey-sz*Math.sin(angle-0.4));
+                        int ax2=(int)(ex-sz*Math.cos(angle+0.4)),ay2=(int)(ey-sz*Math.sin(angle+0.4));
+                        g2.fillPolygon(new int[]{ex,ax1,ax2},new int[]{ey,ay1,ay2},3);
+                    }
+                }
+                g2.dispose();
+            }
+        };
+        dragLineOverlay.setContentPane(linePanel);
+        dragLineOverlay.setVisible(true);
+    }
+
+    private void refreshLineOverlay() {
+        if (dragLineOverlay!=null) dragLineOverlay.repaint();
+    }
+
+    private void hideDragLineOverlay() {
+        if (dragLineOverlay!=null) { dragLineOverlay.dispose(); dragLineOverlay=null; }
     }
 
     private void showSmartBar() {
@@ -457,7 +494,7 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         barCoordsLabel.setHorizontalAlignment(SwingConstants.LEFT);
 
         // ── Mouse widget panel ────────────────────────────────
-        int mw=52, mh=38;
+        int mw=56, mh=48;
         JPanel mouseWidget = new JPanel(null) {
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
@@ -466,38 +503,29 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         };
         mouseWidget.setPreferredSize(new Dimension(mw, mh));
         mouseWidget.setOpaque(false);
-        mouseWidget.setToolTipText("Click left/right/scroll to select click type");
+        mouseWidget.setToolTipText("Click to select click type");
         mouseWidget.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JLabel typeNameLbl = new JLabel(typeName(currentPinType));
+        typeNameLbl.setFont(new Font("SansSerif",Font.BOLD,10));
+        typeNameLbl.setForeground(typeColor(currentPinType));
+        typeNameLbl.setPreferredSize(new Dimension(60, 18));
+        typeNameLbl.setHorizontalAlignment(SwingConstants.LEFT);
+
         mouseWidget.addMouseListener(new MouseAdapter(){
             public void mouseClicked(MouseEvent e) {
                 int mx = mw/2;
-                int swX = mx-3, swY = 8;
-                // Scroll wheel zone
-                if (e.getX()>=swX-2 && e.getX()<=swX+8 && e.getY()>=swY && e.getY()<=swY+14) {
-                    currentPinType = 2;
+                int topH = (mh-8)/2 + 4;
+                if (e.getX()>=mx-6 && e.getX()<=mx+6 && e.getY()>=4 && e.getY()<=topH-2) {
+                    currentPinType = 2; // middle
+                } else if (e.getY() >= topH) {
+                    currentPinType = 3; // drag
                 } else if (e.getX() < mx) {
                     currentPinType = 0; // left
                 } else {
                     currentPinType = 1; // right
                 }
                 mouseWidget.repaint();
-            }
-        });
-
-        // Type labels
-        JLabel typeLbl = new JLabel() {
-            public void paint(Graphics g) {
-                super.paint(g);
-            }
-        };
-        // We'll use a live-updating label showing current type name
-        JLabel typeNameLbl = new JLabel(typeName(currentPinType));
-        typeNameLbl.setFont(new Font("SansSerif",Font.BOLD,10));
-        typeNameLbl.setForeground(typeColor(currentPinType));
-
-        // Update typeNameLbl when mouse widget clicked
-        mouseWidget.addMouseListener(new MouseAdapter(){
-            public void mouseClicked(MouseEvent e){
                 typeNameLbl.setText(typeName(currentPinType));
                 typeNameLbl.setForeground(typeColor(currentPinType));
             }
@@ -527,19 +555,34 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
     }
 
     private String typeName(int t) {
-        switch(t){ case 1: return "Right"; case 2: return "Middle"; default: return "Left"; }
+        switch(t){ case 1: return "Right"; case 2: return "Middle"; case 3: return "Drag"; default: return "Left"; }
     }
     private Color typeColor(int t) {
-        switch(t){ case 1: return new Color(220,80,80); case 2: return new Color(80,200,120); default: return new Color(80,140,255); }
+        switch(t){ case 1: return new Color(220,80,80); case 2: return new Color(80,200,120); case 3: return new Color(255,140,40); default: return new Color(80,140,255); }
     }
 
     private void hideSmartBar() { if(smartBar!=null){smartBar.dispose();smartBar=null;} }
 
     private void addSmartPin(int x, int y, int btnType) {
-        int row=tableModel.getRowCount(); long iv=getIntervalMs();
-        tableModel.addRow(new Object[]{row+1, x, y, 1, iv, iv, btnType});
-        SmartPin pin=new SmartPin(x, y, row, btnType); smartPins.add(pin);
-        if (smartModeActive) { SwingUtilities.invokeLater(()->{ pin.show(); pin.win.toFront(); }); }
+        if (btnType == 3) {
+            addDragPin(x, y, x+120, y+80); // default drag: start + end offset
+        } else {
+            int row=tableModel.getRowCount(); long iv=getIntervalMs();
+            tableModel.addRow(new Object[]{row+1, x, y, 1, iv, iv, btnType});
+            SmartPin pin=new SmartPin(x, y, row, btnType); smartPins.add(pin);
+            if (smartModeActive) { SwingUtilities.invokeLater(()->{ pin.show(); pin.win.toFront(); }); }
+            if (barPinCountLabel!=null) barPinCountLabel.setText("Pins: "+smartPins.size());
+            refreshSmartInterval();
+        }
+    }
+
+    private void addDragPin(int sx, int sy, int ex, int ey) {
+        int row = tableModel.getRowCount(); long iv = getIntervalMs();
+        tableModel.addRow(new Object[]{row+1, sx, sy, 1, iv, iv, 3}); // start
+        tableModel.addRow(new Object[]{row+2, ex, ey, 1, iv, iv, 3}); // end
+        DragPin dp = new DragPin(sx, sy, ex, ey, row);
+        smartPins.add(dp);
+        if (smartModeActive) { SwingUtilities.invokeLater(()->{ dp.show(); dp.startWin.toFront(); }); }
         if (barPinCountLabel!=null) barPinCountLabel.setText("Pins: "+smartPins.size());
         refreshSmartInterval();
     }
@@ -555,6 +598,15 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         SmartPin(int x, int y, int row, int btnType) {
             screenX=x; screenY=y; rowIndex=row; this.btnType=btnType; build();
         }
+
+        /** Constructor that skips build() — used by subclasses that manage their own window */
+        SmartPin(int x, int y, int row, int btnType, boolean skipBuild) {
+            screenX=x; screenY=y; rowIndex=row; this.btnType=btnType;
+            if (!skipBuild) build();
+        }
+
+        /** How many table rows this pin occupies */
+        int rowSpan() { return 1; }
 
         void build() {
             win=new JWindow(); win.setAlwaysOnTop(true); win.setBackground(new Color(0,0,0,1));
@@ -592,8 +644,13 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
                     Graphics2D g2=(Graphics2D)g;
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
                     int cx=getWidth()/2, cy=getHeight()/2;
-                    // Ring color based on type
-                    Color rc = (btnType==1) ? new Color(220,80,80) : (btnType==2) ? new Color(80,200,120) : pinRingColor;
+                    // Ring color by type: left=blue, right=red, middle=green
+                    Color rc;
+                    switch(btnType){
+                        case 1: rc=new Color(220,80,80); break;
+                        case 2: rc=new Color(80,200,120); break;
+                        default: rc=new Color(80,140,255); break;
+                    }
                     int ringR=10;
                     g2.setColor(rc); g2.setStroke(new BasicStroke(2f));
                     g2.drawOval(cx-ringR,cy-ringR,ringR*2,ringR*2);
@@ -609,14 +666,6 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
                         g2.setColor(new Color(0,0,0,160)); g2.fillOval(cx-6,cy-6,12,12);
                         g2.setColor(Color.WHITE); g2.drawString(lbl,cx-lw/2,cy+4);
                     }
-                    // Type badge bottom-right
-                    String tb = (btnType==1)?"R":(btnType==2)?"M":"L";
-                    Color tc = (btnType==1)?new Color(220,80,80):(btnType==2)?new Color(80,200,120):new Color(80,140,255);
-                    g2.setFont(new Font("SansSerif",Font.BOLD,8));
-                    g2.setColor(new Color(0,0,0,180)); g2.fillRoundRect(cx+5,cy+5,10,10,3,3);
-                    g2.setColor(tc);
-                    FontMetrics fm2=g2.getFontMetrics(); int tw=fm2.stringWidth(tb);
-                    g2.drawString(tb, cx+5+(10-tw)/2, cy+5+9);
                 }
             };
             panel.setPreferredSize(new Dimension(PSZ,PSZ));
@@ -628,13 +677,120 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         void dispose() { win.dispose(); }
     }
 
+    // ── Drag pin — red arrow line between two points ──────────
+    // ── Drag pin — red arrow line between two draggable handles ─
+    // ── Drag pin — two handle pins + line drawn on shared overlay ──
+    class DragPin extends SmartPin {
+        int endX, endY;
+        // Two separate small JWindows for handles
+        JWindow startWin, endWin;
+        static final int HSZ = 44;
+
+        DragPin(int sx, int sy, int ex, int ey, int row) {
+            super(sx, sy, row, 3, true);
+            endX=ex; endY=ey;
+            buildHandles();
+        }
+
+        @Override int rowSpan() { return 2; }
+
+        void buildHandles() {
+            startWin = buildHandle(true);
+            endWin   = buildHandle(false);
+        }
+
+        JWindow buildHandle(boolean isStart) {
+            JWindow hw = new JWindow();
+            hw.setAlwaysOnTop(true);
+            hw.setFocusableWindowState(false);  // never steal focus
+            hw.setBackground(new Color(0,0,0,1));
+            JPanel p = new JPanel(null) {
+                { setBackground(new Color(0,0,0,1)); }
+                protected void paintComponent(Graphics g) {
+                    Graphics2D g2 = (Graphics2D)g;
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    int cx=getWidth()/2, cy=getHeight()/2;
+                    // Both handles: orange ring (drag color)
+                    g2.setColor(new Color(255,140,40)); g2.setStroke(new BasicStroke(2f));
+                    g2.drawOval(cx-10,cy-10,20,20);
+                    // Crosshair
+                    g2.setColor(new Color(255,255,255,230)); g2.setStroke(new BasicStroke(1.5f));
+                    int arm=7, gap=3;
+                    g2.drawLine(cx-arm,cy,cx-gap,cy); g2.drawLine(cx+gap,cy,cx+arm,cy);
+                    g2.drawLine(cx,cy-arm,cx,cy-gap); g2.drawLine(cx,cy+gap,cx,cy+arm);
+                    // Center dot
+                    g2.setColor(new Color(255,50,50)); g2.fillOval(cx-3,cy-3,6,6);
+                    // Number: start=rowIndex+1, end=rowIndex+2
+                    String num = isStart ? String.valueOf(rowIndex+1) : String.valueOf(rowIndex+2);
+                    g2.setFont(new Font("SansSerif",Font.BOLD,9));
+                    FontMetrics fm=g2.getFontMetrics(); int lw=fm.stringWidth(num);
+                    g2.setColor(new Color(0,0,0,160)); g2.fillOval(cx-6,cy-6,12,12);
+                    g2.setColor(Color.WHITE); g2.drawString(num,cx-lw/2,cy+4);
+                }
+            };
+            int[] off={0,0};
+            p.addMouseListener(new MouseAdapter(){
+                public void mousePressed(MouseEvent e){ off[0]=e.getX(); off[1]=e.getY(); }
+                public void mouseReleased(MouseEvent e){ syncToTable(); refreshLineOverlay(); }
+                public void mouseClicked(MouseEvent e){ if(e.getButton()==MouseEvent.BUTTON3) removePin(DragPin.this); }
+            });
+            p.addMouseMotionListener(new MouseMotionAdapter(){
+                public void mouseDragged(MouseEvent e){
+                    Point loc=hw.getLocationOnScreen();
+                    int nx=loc.x+e.getX()-off[0], ny=loc.y+e.getY()-off[1];
+                    hw.setLocation(nx,ny);
+                    if (isStart){ screenX=nx+HSZ/2; screenY=ny+HSZ/2; }
+                    else { endX=nx+HSZ/2; endY=ny+HSZ/2; }
+                    refreshLineOverlay();
+                }
+            });
+            p.setPreferredSize(new Dimension(HSZ,HSZ));
+            hw.setContentPane(p); hw.setSize(HSZ,HSZ);
+            placeHandle(hw, isStart);
+            return hw;
+        }
+
+        void placeHandle(JWindow hw, boolean isStart) {
+            int sx = isStart ? screenX : endX;
+            int sy = isStart ? screenY : endY;
+            hw.setLocation(sx-HSZ/2, sy-HSZ/2);
+        }
+
+        void syncToTable(){
+            if (rowIndex<tableModel.getRowCount()){ tableModel.setValueAt(screenX,rowIndex,1); tableModel.setValueAt(screenY,rowIndex,2); }
+            if (rowIndex+1<tableModel.getRowCount()){ tableModel.setValueAt(endX,rowIndex+1,1); tableModel.setValueAt(endY,rowIndex+1,2); }
+        }
+
+        @Override void show(){
+            startWin.setVisible(true); endWin.setVisible(true);
+            refreshLineOverlay();
+        }
+        @Override void hide(){
+            startWin.setVisible(false); endWin.setVisible(false);
+        }
+        @Override void dispose(){
+            startWin.dispose(); endWin.dispose();
+            // win field inherited from SmartPin — not used but null it out
+            win = null;
+        }
+        // win is unused for DragPin — set to null to avoid confusion
+        { win = null; }
+    }
+
     private void removePin(SmartPin pin) {
         int idx=smartPins.indexOf(pin); if(idx<0)return;
-        pin.dispose(); smartPins.remove(idx); tableModel.removeRow(idx); refreshRowNumbers();
-        for (int i=0;i<smartPins.size();i++) smartPins.get(i).rowIndex=i;
+        int span = pin.rowSpan();
+        pin.dispose(); smartPins.remove(idx);
+        for (int i=0; i<span && pin.rowIndex < tableModel.getRowCount(); i++)
+            tableModel.removeRow(pin.rowIndex);
+        int r=0;
+        for (SmartPin p : smartPins) { p.rowIndex=r; r+=p.rowSpan(); }
+        refreshRowNumbers();
         if (barPinCountLabel!=null) barPinCountLabel.setText("Pins: "+smartPins.size());
         refreshSmartInterval();
+        refreshLineOverlay();
     }
+
 
     // ── Interval picker ───────────────────────────────────────
     private long showIntervalPicker(String title, long currentMs) {
