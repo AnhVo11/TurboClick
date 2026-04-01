@@ -191,6 +191,44 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
                 return lbl;
             }
         };
+        // Full-row renderer: highlight drag pair rows with orange tint
+        TableCellRenderer rowRenderer = new DefaultTableCellRenderer() {
+            public Component getTableCellRendererComponent(JTable t, Object val, boolean sel, boolean foc, int r, int c) {
+                JLabel lbl = (JLabel)super.getTableCellRendererComponent(t,val,sel,foc,r,c);
+                int typeInt=0;
+                try { typeInt=((Number)t.getModel().getValueAt(r,6)).intValue(); } catch(Exception ignored){}
+                if (typeInt==3) {
+                    lbl.setBackground(sel ? new Color(80,60,20) : new Color(42,35,22));
+                } else {
+                    lbl.setBackground(sel ? new Color(50,80,140) : new Color(32,32,44));
+                }
+                lbl.setForeground(TEXT_MAIN);
+                return lbl;
+            }
+        };
+        for (int i=0;i<6;i++) pointsTable.getColumnModel().getColumn(i).setCellRenderer(rowRenderer);
+
+        // # column: show drag indicators with numbers
+        pointsTable.getColumnModel().getColumn(0).setCellRenderer(new DefaultTableCellRenderer() {
+            public Component getTableCellRendererComponent(JTable t, Object val, boolean sel, boolean foc, int r, int c) {
+                int typeInt=0;
+                try { typeInt=((Number)t.getModel().getValueAt(r,6)).intValue(); } catch(Exception ignored){}
+                String display = val!=null?val.toString():"";
+                if (typeInt==3) {
+                    boolean prevIsDrag=false;
+                    if (r>0) try{ prevIsDrag=((Number)t.getModel().getValueAt(r-1,6)).intValue()==3; }catch(Exception ignored){}
+                    display = prevIsDrag ? "\u21b3"+display : "\u25c6"+display;
+                }
+                JLabel lbl=(JLabel)super.getTableCellRendererComponent(t,display,sel,foc,r,c);
+                lbl.setHorizontalAlignment(SwingConstants.LEFT);
+                lbl.setFont(new Font("SansSerif",Font.BOLD,10));
+                lbl.setBackground(sel ? new Color(80,60,20) : (typeInt==3 ? new Color(42,35,22) : new Color(32,32,44)));
+                lbl.setForeground(typeInt==3 ? new Color(255,140,40) : TEXT_DIM);
+                return lbl;
+            }
+        });
+
+        // Delay columns still need their own renderer on top
         pointsTable.getColumnModel().getColumn(4).setCellRenderer(delayRenderer);
         pointsTable.getColumnModel().getColumn(5).setCellRenderer(delayRenderer);
 
@@ -281,14 +319,41 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
             tableModel.addRow(new Object[]{row+1, scr.width/2, scr.height/2, 1, 100L, 100L, 0});
             refreshSmartInterval();
         });
+        final boolean[] suppressDragWarning = {false};
         remBtn.addActionListener(e -> {
             int row=pointsTable.getSelectedRow();
-            if (row>=0) {
+            if (row<0) return;
+            int typeInt=0;
+            try { typeInt=((Number)tableModel.getValueAt(row,6)).intValue(); } catch(Exception ignored){}
+            if (typeInt==3) {
+                if (!suppressDragWarning[0]) {
+                    JCheckBox dontShow = new JCheckBox("Don't show this again");
+                    dontShow.setBackground(new Color(28,28,38)); dontShow.setForeground(new Color(180,180,200));
+                    Object[] msg = {"This will delete BOTH points of the drag pair.", dontShow};
+                    int result = JOptionPane.showConfirmDialog(SimpleClickPanel.this, msg,
+                        "Delete drag pair?", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+                    if (result != JOptionPane.OK_OPTION) return;
+                    if (dontShow.isSelected()) suppressDragWarning[0]=true;
+                }
+                // Find which drag row it is (start or end) then remove both
+                boolean prevIsDrag = row>0 && isDragRow(row-1);
+                int startRow = prevIsDrag ? row-1 : row;
+                // Remove the DragPin from smartPins
+                for (int i=smartPins.size()-1;i>=0;i--) {
+                    if (smartPins.get(i) instanceof DragPin && smartPins.get(i).rowIndex==startRow) {
+                        smartPins.get(i).dispose(); smartPins.remove(i); break;
+                    }
+                }
+                // Remove both table rows (remove higher index first)
+                if (startRow+1 < tableModel.getRowCount()) tableModel.removeRow(startRow+1);
+                if (startRow < tableModel.getRowCount()) tableModel.removeRow(startRow);
+            } else {
                 if (row<smartPins.size()) { smartPins.get(row).dispose(); smartPins.remove(row); }
-                tableModel.removeRow(row); refreshRowNumbers();
-                for (int i=0;i<smartPins.size();i++) smartPins.get(i).rowIndex=i;
-                refreshSmartInterval();
+                tableModel.removeRow(row);
             }
+            refreshRowNumbers();
+            int r=0; for (SmartPin sp:smartPins){ sp.rowIndex=r; r+=sp.rowSpan(); }
+            refreshSmartInterval(); refreshLineOverlay();
         });
         clrBtn.addActionListener(e -> {
             for (SmartPin pin:smartPins) pin.dispose(); smartPins.clear();
@@ -442,7 +507,10 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
                 for (SmartPin pin : smartPins) {
                     if (pin instanceof DragPin) {
                         DragPin dp = (DragPin)pin;
-                        int sx=dp.screenX, sy=dp.screenY, ex=dp.endX, ey=dp.endY;
+                        if (dp.startWin==null || dp.endWin==null) continue;
+                        // Read directly from window positions — always accurate during drag
+                        int sx=dp.startWin.getX()+dp.HSZ/2, sy=dp.startWin.getY()+dp.HSZ/2;
+                        int ex=dp.endWin.getX()+dp.HSZ/2,   ey=dp.endWin.getY()+dp.HSZ/2;
                         // Dashed orange line
                         float[] dash={10f,5f};
                         g2.setColor(new Color(255,140,40));
@@ -559,6 +627,11 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
     }
     private Color typeColor(int t) {
         switch(t){ case 1: return new Color(220,80,80); case 2: return new Color(80,200,120); case 3: return new Color(255,140,40); default: return new Color(80,140,255); }
+    }
+
+    private boolean isDragRow(int row) {
+        if (row<0||row>=tableModel.getRowCount()) return false;
+        try { return ((Number)tableModel.getValueAt(row,6)).intValue()==3; } catch(Exception e){ return false; }
     }
 
     private void hideSmartBar() { if(smartBar!=null){smartBar.dispose();smartBar=null;} }
@@ -682,9 +755,9 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
     // ── Drag pin — two handle pins + line drawn on shared overlay ──
     class DragPin extends SmartPin {
         int endX, endY;
-        // Two separate small JWindows for handles
-        JWindow startWin, endWin;
+        JWindow startWin, endWin, midWin;
         static final int HSZ = 44;
+        static final int MSZ = 20; // midpoint handle size
 
         DragPin(int sx, int sy, int ex, int ey, int row) {
             super(sx, sy, row, 3, true);
@@ -697,6 +770,56 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         void buildHandles() {
             startWin = buildHandle(true);
             endWin   = buildHandle(false);
+            buildMidHandle();
+        }
+
+        void buildMidHandle() {
+            midWin = new JWindow();
+            midWin.setAlwaysOnTop(true);
+            midWin.setFocusableWindowState(false);
+            midWin.setBackground(new Color(0,0,0,1));
+            JPanel mp = new JPanel(null) {
+                { setBackground(new Color(0,0,0,1)); }
+                protected void paintComponent(Graphics g) {
+                    Graphics2D g2=(Graphics2D)g;
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                    int cx=getWidth()/2, cy=getHeight()/2;
+                    // Small orange diamond — indicates draggable line
+                    g2.setColor(new Color(255,140,40,180));
+                    g2.setStroke(new BasicStroke(1.5f));
+                    int[] xs={cx,cx+7,cx,cx-7}, ys={cy-7,cy,cy+7,cy};
+                    g2.fillPolygon(xs,ys,4);
+                    g2.setColor(new Color(255,200,100));
+                    g2.drawPolygon(xs,ys,4);
+                }
+            };
+            int[] lastScreen={0,0};
+            mp.addMouseListener(new MouseAdapter(){
+                public void mousePressed(MouseEvent e){
+                    Point sc=MouseInfo.getPointerInfo().getLocation();
+                    lastScreen[0]=sc.x; lastScreen[1]=sc.y;
+                }
+                public void mouseReleased(MouseEvent e){ syncToTable(); refreshLineOverlay(); }
+                public void mouseClicked(MouseEvent e){ if(e.getButton()==MouseEvent.BUTTON3) removePin(DragPin.this); }
+            });
+            mp.addMouseMotionListener(new MouseMotionAdapter(){
+                public void mouseDragged(MouseEvent e){
+                    Point sc=MouseInfo.getPointerInfo().getLocation();
+                    int dx=sc.x-lastScreen[0], dy=sc.y-lastScreen[1];
+                    lastScreen[0]=sc.x; lastScreen[1]=sc.y;
+                    screenX+=dx; screenY+=dy; endX+=dx; endY+=dy;
+                    placeHandle(startWin,true); placeHandle(endWin,false); placeMidHandle();
+                    refreshLineOverlay();
+                }
+            });
+            mp.setPreferredSize(new Dimension(MSZ,MSZ));
+            midWin.setContentPane(mp); midWin.setSize(MSZ,MSZ);
+            placeMidHandle();
+        }
+
+        void placeMidHandle() {
+            int mx=(screenX+endX)/2, my=(screenY+endY)/2;
+            midWin.setLocation(mx-MSZ/2, my-MSZ/2);
         }
 
         JWindow buildHandle(boolean isStart) {
@@ -710,7 +833,8 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
                     Graphics2D g2 = (Graphics2D)g;
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                     int cx=getWidth()/2, cy=getHeight()/2;
-                    // Both handles: orange ring (drag color)
+                    boolean hovered = Boolean.TRUE.equals(getClientProperty("h"));
+                    // Orange ring
                     g2.setColor(new Color(255,140,40)); g2.setStroke(new BasicStroke(2f));
                     g2.drawOval(cx-10,cy-10,20,20);
                     // Crosshair
@@ -718,29 +842,39 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
                     int arm=7, gap=3;
                     g2.drawLine(cx-arm,cy,cx-gap,cy); g2.drawLine(cx+gap,cy,cx+arm,cy);
                     g2.drawLine(cx,cy-arm,cx,cy-gap); g2.drawLine(cx,cy+gap,cx,cy+arm);
-                    // Center dot
-                    g2.setColor(new Color(255,50,50)); g2.fillOval(cx-3,cy-3,6,6);
-                    // Number: start=rowIndex+1, end=rowIndex+2
-                    String num = isStart ? String.valueOf(rowIndex+1) : String.valueOf(rowIndex+2);
-                    g2.setFont(new Font("SansSerif",Font.BOLD,9));
-                    FontMetrics fm=g2.getFontMetrics(); int lw=fm.stringWidth(num);
-                    g2.setColor(new Color(0,0,0,160)); g2.fillOval(cx-6,cy-6,12,12);
-                    g2.setColor(Color.WHITE); g2.drawString(num,cx-lw/2,cy+4);
+                    if (hovered) {
+                        // Red dot on hover — hide number
+                        g2.setColor(new Color(255,50,50)); g2.fillOval(cx-4,cy-4,8,8);
+                    } else {
+                        // Number when idle
+                        g2.setColor(new Color(255,50,50)); g2.fillOval(cx-3,cy-3,6,6);
+                        String num = isStart ? String.valueOf(rowIndex+1) : String.valueOf(rowIndex+2);
+                        g2.setFont(new Font("SansSerif",Font.BOLD,9));
+                        FontMetrics fm=g2.getFontMetrics(); int lw=fm.stringWidth(num);
+                        g2.setColor(new Color(0,0,0,160)); g2.fillOval(cx-6,cy-6,12,12);
+                        g2.setColor(Color.WHITE); g2.drawString(num,cx-lw/2,cy+4);
+                    }
                 }
             };
-            int[] off={0,0};
+            int[] lastSc={0,0};
             p.addMouseListener(new MouseAdapter(){
-                public void mousePressed(MouseEvent e){ off[0]=e.getX(); off[1]=e.getY(); }
+                public void mouseEntered(MouseEvent e){ p.putClientProperty("h",true); p.repaint(); }
+                public void mouseExited(MouseEvent e) { p.putClientProperty("h",false); p.repaint(); }
+                public void mousePressed(MouseEvent e){
+                    Point sc=MouseInfo.getPointerInfo().getLocation();
+                    lastSc[0]=sc.x; lastSc[1]=sc.y;
+                }
                 public void mouseReleased(MouseEvent e){ syncToTable(); refreshLineOverlay(); }
                 public void mouseClicked(MouseEvent e){ if(e.getButton()==MouseEvent.BUTTON3) removePin(DragPin.this); }
             });
             p.addMouseMotionListener(new MouseMotionAdapter(){
                 public void mouseDragged(MouseEvent e){
-                    Point loc=hw.getLocationOnScreen();
-                    int nx=loc.x+e.getX()-off[0], ny=loc.y+e.getY()-off[1];
-                    hw.setLocation(nx,ny);
-                    if (isStart){ screenX=nx+HSZ/2; screenY=ny+HSZ/2; }
-                    else { endX=nx+HSZ/2; endY=ny+HSZ/2; }
+                    Point sc=MouseInfo.getPointerInfo().getLocation();
+                    int dx=sc.x-lastSc[0], dy=sc.y-lastSc[1];
+                    lastSc[0]=sc.x; lastSc[1]=sc.y;
+                    if (isStart){ screenX+=dx; screenY+=dy; placeHandle(startWin,true); }
+                    else { endX+=dx; endY+=dy; placeHandle(endWin,false); }
+                    placeMidHandle();
                     refreshLineOverlay();
                 }
             });
@@ -762,18 +896,18 @@ public class SimpleClickPanel extends JPanel implements NativeKeyListener {
         }
 
         @Override void show(){
-            startWin.setVisible(true); endWin.setVisible(true);
+            startWin.setVisible(true); endWin.setVisible(true); midWin.setVisible(true);
+            placeMidHandle();
             refreshLineOverlay();
         }
         @Override void hide(){
-            startWin.setVisible(false); endWin.setVisible(false);
+            startWin.setVisible(false); endWin.setVisible(false); midWin.setVisible(false);
         }
         @Override void dispose(){
-            startWin.dispose(); endWin.dispose();
-            // win field inherited from SmartPin — not used but null it out
+            startWin.dispose(); endWin.dispose(); midWin.dispose();
             win = null;
         }
-        // win is unused for DragPin — set to null to avoid confusion
+        // win is unused for DragPin
         { win = null; }
     }
 
