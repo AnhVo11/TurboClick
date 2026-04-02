@@ -115,13 +115,13 @@ public class TreeTab extends JPanel {
         nameLbl.setForeground(new Color(200, 200, 220));
         nameLbl.setFont(new Font("SansSerif", Font.BOLD, 12));
 
-        JButton runBtn     = toolBtn("▶  Run",       new Color(40, 200, 80));
-        JButton stopBtn    = toolBtn("■  Stop",       new Color(220, 70, 70));
-        JButton fitBtn     = toolBtn("Fit View",      new Color(100, 100, 130));
-        JButton clearBtn   = toolBtn("Clear",         new Color(150, 60, 60));
+        JButton runBtn = toolBtn("▶  Run", new Color(40, 200, 80));
+        JButton stopBtn = toolBtn("■  Stop", new Color(220, 70, 70));
+        JButton fitBtn = toolBtn("Fit View", new Color(100, 100, 130));
+        JButton clearBtn = toolBtn("Clear", new Color(150, 60, 60));
         JButton architectBtn = toolBtn("⬡ Architect", new Color(80, 160, 255));
-        JButton saveBtn    = toolBtn("💾 Save",        new Color(80, 200, 160));
-        JButton loadBtn    = toolBtn("📂 Load",        new Color(160, 140, 220));
+        JButton saveBtn = toolBtn("⬇  Save", new Color(80, 200, 160));
+        JButton loadBtn = toolBtn("⬆  Load", new Color(160, 140, 220));
 
         JButton loopBtn = toolBtn("↺  Loop", new Color(220, 180, 40));
         loopBtn.addActionListener(e -> {
@@ -139,7 +139,8 @@ public class TreeTab extends JPanel {
 
         architectBtn.addActionListener(e -> {
             Window w = SwingUtilities.getWindowAncestor(this);
-            if (w != null) w.setVisible(false);
+            if (w != null)
+                w.setVisible(false);
             new javax.swing.Timer(200, ev -> {
                 ((javax.swing.Timer) ev.getSource()).stop();
                 TaskArchitectOverlay.show(canvas.getNodes(), w, () -> canvas.repaint());
@@ -161,7 +162,8 @@ public class TreeTab extends JPanel {
             fc.setDialogTitle("Save Task");
             fc.setFileFilter(new FileNameExtensionFilter("TurboClick Task (*.json)", "json"));
             fc.setSelectedFile(new File(treeName + ".json"));
-            if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+            if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION)
+                return;
             File file = fc.getSelectedFile();
             if (!file.getName().endsWith(".json"))
                 file = new File(file.getAbsolutePath() + ".json");
@@ -186,7 +188,8 @@ public class TreeTab extends JPanel {
             JFileChooser fc = new JFileChooser();
             fc.setDialogTitle("Load Task");
             fc.setFileFilter(new FileNameExtensionFilter("TurboClick Task (*.json)", "json"));
-            if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+            if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION)
+                return;
             File file = fc.getSelectedFile();
             try {
                 SaveFormat.TaskFile tf = TaskSerializer.load(file);
@@ -195,7 +198,8 @@ public class TreeTab extends JPanel {
                     int r = JOptionPane.showConfirmDialog(this,
                             "Replace current canvas with \"" + tf.taskName + "\"?",
                             "Load Task", JOptionPane.YES_NO_OPTION);
-                    if (r != JOptionPane.YES_OPTION) return;
+                    if (r != JOptionPane.YES_OPTION)
+                        return;
                     canvas.getNodes().clear();
                     canvas.getArrows().clear();
                 }
@@ -212,8 +216,8 @@ public class TreeTab extends JPanel {
             }
         });
 
-        JButton zoomInBtn  = toolBtn("+",   new Color(90, 90, 120));
-        JButton zoomOutBtn = toolBtn("-",   new Color(90, 90, 120));
+        JButton zoomInBtn = toolBtn("+", new Color(90, 90, 120));
+        JButton zoomOutBtn = toolBtn("-", new Color(90, 90, 120));
         JButton zoomRstBtn = toolBtn("1:1", new Color(90, 90, 120));
         zoomInBtn.addActionListener(e -> canvas.zoomIn());
         zoomOutBtn.addActionListener(e -> canvas.zoomOut());
@@ -244,7 +248,8 @@ public class TreeTab extends JPanel {
     }
 
     public void startTree() {
-        if (treeRunning) return;
+        if (treeRunning)
+            return;
         Map<String, BaseNode> nodeMap = canvas.getNodes();
         if (nodeMap.isEmpty()) {
             JOptionPane.showMessageDialog(this, "No nodes on canvas.\nClick a node from the palette above to add one.");
@@ -268,14 +273,20 @@ public class TreeTab extends JPanel {
                 SwingUtilities.invokeLater(() -> {
                     hideRunHud();
                     Window w = SwingUtilities.getWindowAncestor(this);
-                    if (w != null) { w.setVisible(true); w.toFront(); }
-                    if (onRunStateChanged != null) onRunStateChanged.run();
+                    if (w != null) {
+                        w.setVisible(true);
+                        w.toFront();
+                    }
+                    if (onRunStateChanged != null)
+                        onRunStateChanged.run();
                 });
             });
             treeRunning = true;
-            if (onRunStateChanged != null) onRunStateChanged.run();
+            if (onRunStateChanged != null)
+                onRunStateChanged.run();
             Window w = SwingUtilities.getWindowAncestor(this);
-            if (w != null) w.setVisible(false);
+            if (w != null)
+                w.setVisible(false);
             showRunHud(ctx);
             Thread t = new Thread(engine);
             t.setDaemon(true);
@@ -302,11 +313,17 @@ public class TreeTab extends JPanel {
             return;
         }
         Map<String, BaseNode> nodeMap = canvas.getNodes();
-        if (nodeMap.isEmpty()) { looping = false; return; }
+        if (nodeMap.isEmpty()) {
+            looping = false;
+            return;
+        }
         String startId = canvas.getStartNodeId();
         if (startId == null || !nodeMap.containsKey(startId))
             startId = findStartNode(nodeMap);
-        if (startId == null) { looping = false; return; }
+        if (startId == null) {
+            looping = false;
+            return;
+        }
         try {
             ExecutionContext ctx = new ExecutionContext(new java.awt.Robot(), treeId);
             engine = new RuleEngine(nodeMap, startId, ctx);
@@ -320,19 +337,27 @@ public class TreeTab extends JPanel {
                     SwingUtilities.invokeLater(() -> {
                         hideRunHud();
                         Window w = SwingUtilities.getWindowAncestor(TreeTab.this);
-                        if (w != null) { w.setVisible(true); w.toFront(); }
+                        if (w != null) {
+                            w.setVisible(true);
+                            w.toFront();
+                        }
                         loopBtn.setText("↺  Loop");
                         loopBtn.setForeground(new Color(220, 180, 40));
-                        if (onRunStateChanged != null) onRunStateChanged.run();
+                        if (onRunStateChanged != null)
+                            onRunStateChanged.run();
                     });
                 }
             });
             treeRunning = true;
-            if (onRunStateChanged != null) onRunStateChanged.run();
+            if (onRunStateChanged != null)
+                onRunStateChanged.run();
             Window w = SwingUtilities.getWindowAncestor(this);
-            if (w != null && w.isVisible()) w.setVisible(false);
-            if (runHud == null) showRunHud(ctx);
-            else updateHudCtx(ctx);
+            if (w != null && w.isVisible())
+                w.setVisible(false);
+            if (runHud == null)
+                showRunHud(ctx);
+            else
+                updateHudCtx(ctx);
             Thread t = new Thread(engine);
             t.setDaemon(true);
             t.start();
@@ -344,13 +369,18 @@ public class TreeTab extends JPanel {
 
     public void stopTree() {
         looping = false;
-        if (engine != null) engine.stop();
+        if (engine != null)
+            engine.stop();
         treeRunning = false;
         SwingUtilities.invokeLater(() -> {
             hideRunHud();
             Window w = SwingUtilities.getWindowAncestor(this);
-            if (w != null) { w.setVisible(true); w.toFront(); }
-            if (onRunStateChanged != null) onRunStateChanged.run();
+            if (w != null) {
+                w.setVisible(true);
+                w.toFront();
+            }
+            if (onRunStateChanged != null)
+                onRunStateChanged.run();
         });
     }
 
@@ -358,7 +388,8 @@ public class TreeTab extends JPanel {
     private javax.swing.JLabel hudNodeLbl, hudDetailLbl;
 
     private void updateHudCtx(engine.ExecutionContext ctx) {
-        if (hudNodeLbl == null) return;
+        if (hudNodeLbl == null)
+            return;
         ctx.setStatusCallback((nodeName, detail) -> SwingUtilities.invokeLater(() -> {
             hudNodeLbl.setText(nodeName);
             hudDetailLbl.setText("  " + detail);
@@ -405,7 +436,7 @@ public class TreeTab extends JPanel {
         detailLbl.setForeground(new Color(80, 220, 120));
         detailLbl.setPreferredSize(new Dimension(110, 18));
 
-        hudNodeLbl  = nodeLbl;
+        hudNodeLbl = nodeLbl;
         hudDetailLbl = detailLbl;
 
         JButton stopBtn = new JButton("■ Stop");
@@ -434,7 +465,10 @@ public class TreeTab extends JPanel {
         }));
 
         javax.swing.Timer pulse = new javax.swing.Timer(600, e -> {
-            if (!treeRunning) { ((javax.swing.Timer) e.getSource()).stop(); return; }
+            if (!treeRunning) {
+                ((javax.swing.Timer) e.getSource()).stop();
+                return;
+            }
             boolean on = dotLbl.getForeground().equals(new Color(40, 220, 80));
             dotLbl.setForeground(on ? new Color(20, 140, 50) : new Color(40, 220, 80));
         });
@@ -448,10 +482,15 @@ public class TreeTab extends JPanel {
     }
 
     private void hideRunHud() {
-        if (runHud != null) { runHud.dispose(); runHud = null; }
+        if (runHud != null) {
+            runHud.dispose();
+            runHud = null;
+        }
     }
 
-    public boolean isRunning() { return treeRunning; }
+    public boolean isRunning() {
+        return treeRunning;
+    }
 
     private String findStartNode(Map<String, BaseNode> nodeMap) {
         Set<String> hasIncoming = new HashSet<>();
@@ -477,12 +516,22 @@ public class TreeTab extends JPanel {
                 BorderFactory.createEmptyBorder(4, 10, 4, 10)));
         b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         b.addMouseListener(new java.awt.event.MouseAdapter() {
-            public void mouseEntered(java.awt.event.MouseEvent e) { b.setBackground(new Color(40, 40, 55)); }
-            public void mouseExited(java.awt.event.MouseEvent e)  { b.setBackground(new Color(28, 28, 38)); }
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                b.setBackground(new Color(40, 40, 55));
+            }
+
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                b.setBackground(new Color(28, 28, 38));
+            }
         });
         return b;
     }
 
-    public void setOnRunStateChanged(Runnable cb) { onRunStateChanged = cb; }
-    public NodeCanvas getCanvas() { return canvas; }
+    public void setOnRunStateChanged(Runnable cb) {
+        onRunStateChanged = cb;
+    }
+
+    public NodeCanvas getCanvas() {
+        return canvas;
+    }
 }

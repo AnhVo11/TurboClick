@@ -31,6 +31,11 @@ public class NodeCanvas extends JPanel {
     private int bendDragOrigOffset = 0;
     private String startNodeId = null;
 
+    // ── Rubber-band selection ─────────────────────────────────
+    private Set<BaseNode> selectedNodes = new LinkedHashSet<>();
+    private Point rubberStart = null;
+    private Rectangle rubberRect = null;
+
     // ── Ghost drag (from palette) ─────────────────────────────
     private BaseNode.NodeType ghostType = null;
     private Point ghostPoint = null;
@@ -298,6 +303,18 @@ public class NodeCanvas extends JPanel {
         if (ghostType != null && ghostPoint != null)
             drawGhost(g2);
         g2.dispose();
+        // Rubber band — drawn in screen coords, no transform
+        if (rubberRect != null) {
+            Graphics2D gr = (Graphics2D) g.create();
+            gr.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            gr.setColor(new Color(80, 160, 255, 35));
+            gr.fill(rubberRect);
+            gr.setColor(new Color(80, 160, 255, 200));
+            gr.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
+                    1f, new float[] { 5f, 3f }, 0f));
+            gr.draw(rubberRect);
+            gr.dispose();
+        }
     }
 
     private static String nodeTypeBadge(BaseNode.NodeType type) {
@@ -456,8 +473,10 @@ public class NodeCanvas extends JPanel {
             g2.setStroke(new BasicStroke(3));
             g2.drawRoundRect(x - 2, y - 2, w + 4, h + 4, 14, 14);
         }
-        if (node == selectedNode) {
-            g2.setColor(SELECT_GLOW);
+        if (selectedNodes.contains(node)) {
+            g2.setColor(new Color(80, 160, 255, 160));
+            g2.setStroke(new BasicStroke(2f));
+            g2.drawRoundRect(x - 2, y - 2, w + 4, h + 4, 14, 14);
             g2.setStroke(new BasicStroke(2.5f));
             g2.drawRoundRect(x - 3, y - 3, w + 6, h + 6, 14, 14);
         }
@@ -920,6 +939,8 @@ public class NodeCanvas extends JPanel {
                 selectedArrow.selected = false;
                 selectedArrow = null;
             }
+            selectedNodes.clear();
+            rubberRect = null;
             dragNode = hit;
             dragOffX = cv.x - hit.x;
             dragOffY = cv.y - hit.y;
@@ -949,12 +970,18 @@ public class NodeCanvas extends JPanel {
                 }
                 selectNode(null);
             }
+            if (SwingUtilities.isLeftMouseButton(e)) {
+                rubberStart = e.getPoint();
+                rubberRect = null;
+                selectedNodes.clear();
+            }
             repaint();
         }
     }
 
     private void handleMouseReleased(MouseEvent e) {
         panning = false;
+        rubberStart = null;
         if (bendDragArrow != null) {
             bendDragArrow = null;
             notifyChanged();
@@ -1022,6 +1049,23 @@ public class NodeCanvas extends JPanel {
             repaint();
             return;
         }
+        if (rubberStart != null && dragNode == null && connectFrom == null && !panning) {
+            int rx = Math.min(rubberStart.x, e.getX());
+            int ry = Math.min(rubberStart.y, e.getY());
+            int rw = Math.abs(e.getX() - rubberStart.x);
+            int rh = Math.abs(e.getY() - rubberStart.y);
+            rubberRect = new Rectangle(rx, ry, rw, rh);
+            selectedNodes.clear();
+            for (BaseNode node : nodes.values()) {
+                Rectangle nb = new Rectangle(
+                        (int) (node.x * zoom + panX), (int) (node.y * zoom + panY),
+                        (int) (node.width * zoom), (int) (node.height * zoom));
+                if (rubberRect.intersects(nb))
+                    selectedNodes.add(node);
+            }
+            repaint();
+            return;
+        }
         if (dragNode != null) {
             Point cv = screenToCanvas(e.getPoint());
             dragNode.x = Math.max(0, cv.x - dragOffX);
@@ -1042,6 +1086,8 @@ public class NodeCanvas extends JPanel {
                     return;
                 }
             }
+            showContextMenu(e, cv);
+            return;
         }
 
         // ── Loop badge click (left, single click) ──────────────
@@ -1090,10 +1136,66 @@ public class NodeCanvas extends JPanel {
                 notifyChanged();
             });
             addMenuSep(menu);
+            addMenuSep(menu);
+            addMenuItem(menu, "💾 Save this node", () -> {
+                JFileChooser fc = new JFileChooser();
+                fc.setDialogTitle("Save Node");
+                fc.setFileFilter(
+                        new javax.swing.filechooser.FileNameExtensionFilter("TurboClick Task (*.json)", "json"));
+                fc.setSelectedFile(new java.io.File(hit.label + ".json"));
+                if (fc.showSaveDialog(NodeCanvas.this) != JFileChooser.APPROVE_OPTION)
+                    return;
+                java.io.File file = fc.getSelectedFile();
+                if (!file.getName().endsWith(".json"))
+                    file = new java.io.File(file.getAbsolutePath() + ".json");
+                try {
+                    TaskSerializer.saveNodes(hit.label, java.util.Collections.singletonList(hit), arrows, nodes, file);
+                    JOptionPane.showMessageDialog(NodeCanvas.this, "Saved!", "Saved", JOptionPane.INFORMATION_MESSAGE);
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(NodeCanvas.this, "Save failed:\n" + ex.getMessage(), "Error",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+            });
             addMenuItem(menu, "Delete node", () -> removeNode(hit));
         } else {
+            if (!selectedNodes.isEmpty()) {
+                addMenuHeader(menu, "Selection — " + selectedNodes.size() + " nodes");
+                addMenuItem(menu, "💾 Save selection", () -> {
+                    JFileChooser fc = new JFileChooser();
+                    fc.setDialogTitle("Save Selection");
+                    fc.setFileFilter(
+                            new javax.swing.filechooser.FileNameExtensionFilter("TurboClick Task (*.json)", "json"));
+                    fc.setSelectedFile(new java.io.File("selection.json"));
+                    if (fc.showSaveDialog(NodeCanvas.this) != JFileChooser.APPROVE_OPTION)
+                        return;
+                    java.io.File file = fc.getSelectedFile();
+                    if (!file.getName().endsWith(".json"))
+                        file = new java.io.File(file.getAbsolutePath() + ".json");
+                    try {
+                        TaskSerializer.saveNodes("Selection", new ArrayList<>(selectedNodes), arrows, nodes, file);
+                        JOptionPane.showMessageDialog(NodeCanvas.this, "Saved " + selectedNodes.size() + " nodes!",
+                                "Saved", JOptionPane.INFORMATION_MESSAGE);
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(NodeCanvas.this, "Save failed:\n" + ex.getMessage(), "Error",
+                                JOptionPane.ERROR_MESSAGE);
+                    }
+                });
+                addMenuItem(menu, "🗑 Delete selection", () -> {
+                    int r = JOptionPane.showConfirmDialog(NodeCanvas.this,
+                            "Delete " + selectedNodes.size() + " nodes?", "Confirm", JOptionPane.YES_NO_OPTION);
+                    if (r == JOptionPane.YES_OPTION) {
+                        for (BaseNode n : new ArrayList<>(selectedNodes))
+                            removeNode(n);
+                        selectedNodes.clear();
+                    }
+                });
+                addMenuSep(menu);
+            }
             addMenuHeader(menu, "Add Node");
             for (BaseNode.NodeType type : BaseNode.NodeType.values()) {
+                if (type == BaseNode.NodeType.CLICK || type == BaseNode.NodeType.CONDITION
+                        || type == BaseNode.NodeType.LOOP)
+                    continue;
                 final BaseNode.NodeType t = type;
                 addMenuItemColored(menu, NodeFactory.displayName(t), NodeFactory.color(t), () -> {
                     BaseNode n = NodeFactory.create(t, canvas.x, canvas.y);
