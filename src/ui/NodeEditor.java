@@ -2485,6 +2485,27 @@ public class NodeEditor extends JPanel {
             Object v = rowVec.get(col);
             if (v instanceof Number)
                 return ((Number) v).intValue();
+            if (v != null)
+                return Integer.parseInt(v.toString().trim());
+        } catch (Exception ignored) {
+        }
+        // Final fallback — read directly from model without display override
+        try {
+            Object v = tm.getValueAt(row, col);
+            if (v instanceof Number)
+                return ((Number) v).intValue();
+            if (v != null) {
+                String s = v.toString().trim();
+                if (s.equals("R"))
+                    return 1;
+                if (s.equals("M"))
+                    return 2;
+                if (s.equals("D"))
+                    return 3;
+                if (s.equals("L"))
+                    return 0;
+                return Integer.parseInt(s);
+            }
         } catch (Exception ignored) {
         }
         return 0;
