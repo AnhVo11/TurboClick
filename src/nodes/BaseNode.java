@@ -11,12 +11,14 @@ public abstract class BaseNode {
         WATCH_ZONE, CLICK, SIMPLE_CLICK, CONDITION, LOOP, WAIT, STOP, KEYBOARD, IMAGE, WATCH_CASE
     }
 
-    public enum RunState { IDLE, RUNNING, SUCCESS, FAILED }
+    public enum RunState {
+        IDLE, RUNNING, SUCCESS, FAILED
+    }
 
     // ── Identity ─────────────────────────────────────────────
     public final NodeType type;
-    public       String   label;
-    public       String   id;
+    public String label;
+    public String id;
 
     // ── Canvas position / size ───────────────────────────────
     public int x, y, width, height;
@@ -24,41 +26,48 @@ public abstract class BaseNode {
     // ── Branch control ───────────────────────────────────────
     public boolean branchEnabled = true;
     public boolean logTransition = false;
-    public int     entryDelayMs  = 0;
-    public int     nodeLoopCount = 1;   // loop feature: 1 = no loop
+    public int entryDelayMs = 0;
+    public int nodeLoopCount = 1; // loop feature: 1 = no loop
 
     // ── Runtime state ────────────────────────────────────────
-    public volatile RunState runState     = RunState.IDLE;
-    private volatile long    runStateTime = 0;
+    public volatile RunState runState = RunState.IDLE;
+    private volatile long runStateTime = 0;
 
     // ── Ports ────────────────────────────────────────────────
     public List<NodePort> outputs = new ArrayList<>();
-    public List<NodePort> inputs  = new ArrayList<>();
+    public List<NodePort> inputs = new ArrayList<>();
 
     // ── Last match location ───────────────────────────────────
     public volatile int lastMatchX = -1;
     public volatile int lastMatchY = -1;
 
     public BaseNode(NodeType type, String label, int x, int y) {
-        this.type  = type;
+        this.type = type;
         this.label = label;
-        this.x     = x;
-        this.y     = y;
-        this.id    = java.util.UUID.randomUUID().toString().substring(0, 8);
+        this.x = x;
+        this.y = y;
+        this.id = java.util.UUID.randomUUID().toString().substring(0, 8);
     }
 
     // ── Execution ─────────────────────────────────────────────
     public abstract String execute(ExecutionContext ctx) throws InterruptedException;
 
     // ── Appearance overrides ──────────────────────────────────
-    public Color  nodeColor() { return new Color(60, 80, 120); }
-    public String nodeIcon()  { return "\u25b6"; }
+    public Color nodeColor() {
+        return new Color(60, 80, 120);
+    }
+
+    public String nodeIcon() {
+        return "\u25b6";
+    }
 
     // ── Run state ─────────────────────────────────────────────
-    public RunState getRunState() { return runState; }
+    public RunState getRunState() {
+        return runState;
+    }
 
     public void setRunState(RunState rs) {
-        this.runState     = rs;
+        this.runState = rs;
         this.runStateTime = System.currentTimeMillis();
     }
 
@@ -73,7 +82,7 @@ public abstract class BaseNode {
         return p;
     }
 
-    protected NodePort addInputPort(String name) {
+    public NodePort addInputPort(String name) {
         NodePort p = new NodePort(name);
         inputs.add(p);
         return p;
@@ -99,7 +108,8 @@ public abstract class BaseNode {
 
     public Point outputAnchor(String portName) {
         int n = outputs.size();
-        if (n == 0) return new Point(x + width / 2, y + height);
+        if (n == 0)
+            return new Point(x + width / 2, y + height);
         int spacing = width / (n + 1);
         for (int i = 0; i < n; i++) {
             if (outputs.get(i).name.equals(portName))
@@ -110,7 +120,8 @@ public abstract class BaseNode {
 
     public Point leftInputAnchor(String portName) {
         int n = inputs.size();
-        if (n == 0) return new Point(x, y + height / 2);
+        if (n == 0)
+            return new Point(x, y + height / 2);
         int spacing = height / (n + 1);
         for (int i = 0; i < n; i++) {
             if (inputs.get(i).name.equals(portName))
@@ -126,7 +137,8 @@ public abstract class BaseNode {
                 casePorts.add(p);
         }
         int n = casePorts.size();
-        if (n == 0) return new Point(x + width, y + height / 2);
+        if (n == 0)
+            return new Point(x + width, y + height / 2);
         int spacing = inputs.isEmpty() ? height / 2 : height / (inputs.size() + 1);
         for (int i = 0; i < n; i++) {
             if (casePorts.get(i).name.equals(portName))
@@ -137,16 +149,18 @@ public abstract class BaseNode {
 
     // ── Port definition ───────────────────────────────────────
     public static class NodePort {
-        public String  name;
-        public String  customLabel  = "";
-        public String  targetNodeId = null;
-        public boolean enabled      = true;
-        public int     arrowDelayMs = 0;
+        public String name;
+        public String customLabel = "";
+        public String targetNodeId = null;
+        public boolean enabled = true;
+        public int arrowDelayMs = 0;
 
-        public NodePort(String name) { this.name = name; }
+        public NodePort(String name) {
+            this.name = name;
+        }
 
         public NodePort(String name, String targetNodeId) {
-            this.name         = name;
+            this.name = name;
             this.targetNodeId = targetNodeId;
         }
 

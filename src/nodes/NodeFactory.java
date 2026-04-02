@@ -9,18 +9,18 @@ import java.awt.image.BufferedImage;
 // ═══════════════════════════════════════════════════════════════
 class WatchZoneNode extends BaseNode {
 
-    public String        imageName         = "Unnamed Image";
-    public BufferedImage template          = null;
-    public Rectangle     watchZone         = null;
-    public Rectangle     captureRect       = null;
-    public boolean       sameAsCapture     = false;
-    public int           matchThreshold    = 85;
-    public int           pollIntervalMs    = 500;
-    public int           preTriggerDelayMs = 0;
-    public int           timeoutMs         = 0;
-    public boolean       clickAtMatch      = true;
-    public int           clickX = -1, clickY = -1;
-    public int           retryCount        = 0;
+    public String imageName = "Unnamed Image";
+    public BufferedImage template = null;
+    public Rectangle watchZone = null;
+    public Rectangle captureRect = null;
+    public boolean sameAsCapture = false;
+    public int matchThreshold = 85;
+    public int pollIntervalMs = 500;
+    public int preTriggerDelayMs = 0;
+    public int timeoutMs = 0;
+    public boolean clickAtMatch = true;
+    public int clickX = -1, clickY = -1;
+    public int retryCount = 0;
 
     public WatchZoneNode(int x, int y) {
         super(NodeType.WATCH_ZONE, "Watch Zone", x, y);
@@ -31,11 +31,13 @@ class WatchZoneNode extends BaseNode {
 
     @Override
     public String execute(ExecutionContext ctx) throws InterruptedException {
-        if (sameAsCapture && captureRect != null) watchZone = captureRect;
-        if (template == null || watchZone == null) return "Not Found";
+        if (sameAsCapture && captureRect != null)
+            watchZone = captureRect;
+        if (template == null || watchZone == null)
+            return "Not Found";
 
         long deadline = timeoutMs > 0 ? System.currentTimeMillis() + timeoutMs : Long.MAX_VALUE;
-        int  tries    = 0;
+        int tries = 0;
 
         while (System.currentTimeMillis() < deadline && ctx.isRunning()) {
             BufferedImage zoneImg = ctx.getRobot().createScreenCapture(watchZone);
@@ -45,7 +47,7 @@ class WatchZoneNode extends BaseNode {
             ctx.setHudStatus("\u25ce " + imageName, String.format("Match: %.0f%%", pct));
 
             if (result != null) {
-                Point match = new Point((int)result[0], (int)result[1]);
+                Point match = new Point((int) result[0], (int) result[1]);
                 if (preTriggerDelayMs > 0) {
                     ctx.setCountdown(imageName, preTriggerDelayMs);
                     Thread.sleep(preTriggerDelayMs);
@@ -62,26 +64,34 @@ class WatchZoneNode extends BaseNode {
             }
 
             tries++;
-            if (retryCount > 0 && tries > retryCount) break;
+            if (retryCount > 0 && tries > retryCount)
+                break;
             Thread.sleep(pollIntervalMs);
         }
 
         return timeoutMs > 0 ? "Timeout" : "Not Found";
     }
 
-    @Override public Color  nodeColor() { return new Color(50, 130, 200); }
-    @Override public String nodeIcon()  { return "\u25ce"; }
+    @Override
+    public Color nodeColor() {
+        return new Color(50, 130, 200);
+    }
+
+    @Override
+    public String nodeIcon() {
+        return "\u25ce";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  CLICK NODE
+// CLICK NODE
 // ═══════════════════════════════════════════════════════════════
 class ClickNode extends BaseNode {
 
-    public int     clickX      = 0, clickY = 0;
-    public int     clickCount  = 1;
-    public int     subDelayMs  = 100;
-    public int     mouseButton = 0;
+    public int clickX = 0, clickY = 0;
+    public int clickCount = 1;
+    public int subDelayMs = 100;
+    public int mouseButton = 0;
     public boolean doubleClick = false;
 
     public ClickNode(int x, int y) {
@@ -93,36 +103,48 @@ class ClickNode extends BaseNode {
     public String execute(ExecutionContext ctx) throws InterruptedException {
         int btn = mouseButton == 1 ? java.awt.event.InputEvent.BUTTON3_DOWN_MASK
                 : mouseButton == 2 ? java.awt.event.InputEvent.BUTTON2_DOWN_MASK
-                :                    java.awt.event.InputEvent.BUTTON1_DOWN_MASK;
+                        : java.awt.event.InputEvent.BUTTON1_DOWN_MASK;
         ctx.getRobot().mouseMove(clickX, clickY);
         Thread.sleep(40);
         for (int i = 0; i < clickCount; i++) {
             ctx.getRobot().mousePress(btn);
             ctx.getRobot().mouseRelease(btn);
-            if (doubleClick) { Thread.sleep(40); ctx.getRobot().mousePress(btn); ctx.getRobot().mouseRelease(btn); }
-            if (i < clickCount - 1) Thread.sleep(subDelayMs);
+            if (doubleClick) {
+                Thread.sleep(40);
+                ctx.getRobot().mousePress(btn);
+                ctx.getRobot().mouseRelease(btn);
+            }
+            if (i < clickCount - 1)
+                Thread.sleep(subDelayMs);
         }
         return "Done";
     }
 
-    @Override public Color  nodeColor() { return new Color(80, 160, 80); }
-    @Override public String nodeIcon()  { return "\u2197"; }
+    @Override
+    public Color nodeColor() {
+        return new Color(80, 160, 80);
+    }
+
+    @Override
+    public String nodeIcon() {
+        return "\u2197";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  SIMPLE CLICK NODE
+// SIMPLE CLICK NODE
 // ═══════════════════════════════════════════════════════════════
 class SimpleClickNode extends BaseNode {
 
-    public java.util.List<int[]> points    = new java.util.ArrayList<>();
-    public long   intervalMs    = 100;
-    public long   maxClicks     = 0;
-    public int    mouseButton   = 0;
-    public boolean doubleClick  = false;
+    public java.util.List<int[]> points = new java.util.ArrayList<>();
+    public long intervalMs = 100;
+    public long maxClicks = 0;
+    public int mouseButton = 0;
+    public boolean doubleClick = false;
     public boolean waitToFinish = true;
     public boolean runInBackground = false;
     public boolean repeatUntilStopped = false;
-    public int     repeatTimes  = 1;
+    public int repeatTimes = 1;
 
     public SimpleClickNode(int x, int y) {
         super(NodeType.SIMPLE_CLICK, "Simple Click", x, y);
@@ -135,9 +157,8 @@ class SimpleClickNode extends BaseNode {
     public String execute(ExecutionContext ctx) throws InterruptedException {
         ctx.setHudStatus("\u2295 " + label, "Clicks: 0");
         engine.SimpleClickEngine eng = new engine.SimpleClickEngine(
-            points, intervalMs, maxClicks, mouseButton, doubleClick,
-            repeatUntilStopped, repeatTimes, ctx
-        );
+                points, intervalMs, maxClicks, mouseButton, doubleClick,
+                repeatUntilStopped, repeatTimes, ctx);
         eng.setClickCallback(total -> ctx.setHudStatus("\u2295 " + label, "Clicks: " + total));
         if (runInBackground) {
             new Thread(eng).start();
@@ -147,52 +168,70 @@ class SimpleClickNode extends BaseNode {
         return eng.wasStopped() ? "Stopped" : "Done";
     }
 
-    @Override public Color  nodeColor() { return new Color(120, 60, 180); }
-    @Override public String nodeIcon()  { return "\u2295"; }
+    @Override
+    public Color nodeColor() {
+        return new Color(120, 60, 180);
+    }
+
+    @Override
+    public String nodeIcon() {
+        return "\u2295";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  CONDITION NODE
+// CONDITION NODE
 // ═══════════════════════════════════════════════════════════════
 class ConditionNode extends BaseNode {
 
-    public String        imageName      = "Unnamed Image";
-    public BufferedImage template      = null;
-    public Rectangle     checkZone      = null;
-    public int           matchThreshold = 85;
+    public String imageName = "Unnamed Image";
+    public BufferedImage template = null;
+    public Rectangle checkZone = null;
+    public int matchThreshold = 85;
 
     public ConditionNode(int x, int y) {
         super(NodeType.CONDITION, "Condition", x, y);
-        width = 140; height = 65;
+        width = 140;
+        height = 65;
         addOutputPort("Found");
         addOutputPort("Not Found");
     }
 
     @Override
     public String execute(ExecutionContext ctx) throws InterruptedException {
-        if (template == null || checkZone == null) return "Not Found";
+        if (template == null || checkZone == null)
+            return "Not Found";
         BufferedImage zoneImg = ctx.getRobot().createScreenCapture(checkZone);
         Point match = ImageMatcher.findTemplate(template, zoneImg, matchThreshold);
         return match != null ? "Found" : "Not Found";
     }
 
-    @Override public Color  nodeColor() { return new Color(200, 140, 30); }
-    @Override public String nodeIcon()  { return "\u25c7"; }
+    @Override
+    public Color nodeColor() {
+        return new Color(200, 140, 30);
+    }
+
+    @Override
+    public String nodeIcon() {
+        return "\u25c7";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  LOOP NODE
+// LOOP NODE
 // ═══════════════════════════════════════════════════════════════
 class LoopNode extends BaseNode {
+    public static enum LoopMode {
+        FIXED_COUNT, UNTIL_FOUND, UNTIL_NOT_FOUND, FOREVER
+    }
 
-    public enum LoopMode { FIXED_COUNT, UNTIL_FOUND, UNTIL_NOT_FOUND, FOREVER }
-    public LoopMode      loopMode       = LoopMode.FIXED_COUNT;
-    public int           loopCount      = 3;
-    public int           loopDelayMs    = 0;
-    public String        imageName      = "";
-    public BufferedImage template       = null;
-    public Rectangle     checkZone      = null;
-    public int           matchThreshold = 85;
+    public LoopMode loopMode = LoopMode.FIXED_COUNT;
+    public int loopCount = 3;
+    public int loopDelayMs = 0;
+    public String imageName = "";
+    public BufferedImage template = null;
+    public Rectangle checkZone = null;
+    public int matchThreshold = 85;
 
     private transient int currentIteration = 0;
 
@@ -204,46 +243,63 @@ class LoopNode extends BaseNode {
 
     @Override
     public String execute(ExecutionContext ctx) throws InterruptedException {
-        if (loopDelayMs > 0) Thread.sleep(loopDelayMs);
+        if (loopDelayMs > 0)
+            Thread.sleep(loopDelayMs);
         currentIteration++;
         switch (loopMode) {
             case FIXED_COUNT:
-                if (currentIteration <= loopCount) return "Loop";
-                currentIteration = 0; return "Done";
+                if (currentIteration <= loopCount)
+                    return "Loop";
+                currentIteration = 0;
+                return "Done";
             case FOREVER:
                 return ctx.isRunning() ? "Loop" : "Done";
             case UNTIL_FOUND:
             case UNTIL_NOT_FOUND:
-                if (template == null || checkZone == null) return "Done";
+                if (template == null || checkZone == null)
+                    return "Done";
                 BufferedImage img = ctx.getRobot().createScreenCapture(checkZone);
                 Point match = ImageMatcher.findTemplate(template, img, matchThreshold);
                 boolean found = match != null;
-                if (loopMode == LoopMode.UNTIL_FOUND)     return found ? "Done" : "Loop";
-                if (loopMode == LoopMode.UNTIL_NOT_FOUND) return found ? "Loop" : "Done";
+                if (loopMode == LoopMode.UNTIL_FOUND)
+                    return found ? "Done" : "Loop";
+                if (loopMode == LoopMode.UNTIL_NOT_FOUND)
+                    return found ? "Loop" : "Done";
         }
         return "Done";
     }
 
-    public void resetIteration() { currentIteration = 0; }
+    public void resetIteration() {
+        currentIteration = 0;
+    }
 
-    @Override public Color  nodeColor() { return new Color(180, 80, 80); }
-    @Override public String nodeIcon()  { return "\u21ba"; }
+    @Override
+    public Color nodeColor() {
+        return new Color(180, 80, 80);
+    }
+
+    @Override
+    public String nodeIcon() {
+        return "\u21ba";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  WAIT NODE
+// WAIT NODE
 // ═══════════════════════════════════════════════════════════════
 class WaitNode extends BaseNode {
+    public static enum WaitMode {
+        FIXED_DELAY, UNTIL_FOUND, UNTIL_NOT_FOUND
+    }
 
-    public enum WaitMode { FIXED_DELAY, UNTIL_FOUND, UNTIL_NOT_FOUND }
-    public WaitMode      waitMode       = WaitMode.FIXED_DELAY;
-    public int           delayMs        = 1000;
-    public int           timeoutMs      = 0;
-    public String        imageName      = "";
-    public BufferedImage template       = null;
-    public Rectangle     checkZone      = null;
-    public int           matchThreshold = 85;
-    public int           pollMs         = 500;
+    public WaitMode waitMode = WaitMode.FIXED_DELAY;
+    public int delayMs = 1000;
+    public int timeoutMs = 0;
+    public String imageName = "";
+    public BufferedImage template = null;
+    public Rectangle checkZone = null;
+    public int matchThreshold = 85;
+    public int pollMs = 500;
 
     public WaitNode(int x, int y) {
         super(NodeType.WAIT, "Wait", x, y);
@@ -256,18 +312,22 @@ class WaitNode extends BaseNode {
         switch (waitMode) {
             case FIXED_DELAY:
                 long end = System.currentTimeMillis() + delayMs;
-                while (System.currentTimeMillis() < end && ctx.isRunning()) Thread.sleep(50);
+                while (System.currentTimeMillis() < end && ctx.isRunning())
+                    Thread.sleep(50);
                 return "Done";
             case UNTIL_FOUND:
             case UNTIL_NOT_FOUND:
-                if (template == null || checkZone == null) return "Done";
+                if (template == null || checkZone == null)
+                    return "Done";
                 long deadline = timeoutMs > 0 ? System.currentTimeMillis() + timeoutMs : Long.MAX_VALUE;
                 while (System.currentTimeMillis() < deadline && ctx.isRunning()) {
                     BufferedImage img = ctx.getRobot().createScreenCapture(checkZone);
                     Point match = ImageMatcher.findTemplate(template, img, matchThreshold);
                     boolean found = match != null;
-                    if (waitMode == WaitMode.UNTIL_FOUND && found)      return "Done";
-                    if (waitMode == WaitMode.UNTIL_NOT_FOUND && !found) return "Done";
+                    if (waitMode == WaitMode.UNTIL_FOUND && found)
+                        return "Done";
+                    if (waitMode == WaitMode.UNTIL_NOT_FOUND && !found)
+                        return "Done";
                     Thread.sleep(pollMs);
                 }
                 return "Timeout";
@@ -275,119 +335,183 @@ class WaitNode extends BaseNode {
         return "Done";
     }
 
-    @Override public Color  nodeColor() { return new Color(80, 150, 150); }
-    @Override public String nodeIcon()  { return "\u23f1"; }
+    @Override
+    public Color nodeColor() {
+        return new Color(80, 150, 150);
+    }
+
+    @Override
+    public String nodeIcon() {
+        return "\u23f1";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  STOP NODE
+// STOP NODE
 // ═══════════════════════════════════════════════════════════════
 class StopNode extends BaseNode {
+    public static enum StopMode {
+        THIS_TREE, ALL_TREES
+    }
 
-    public enum StopMode { THIS_TREE, ALL_TREES }
-    public StopMode stopMode      = StopMode.THIS_TREE;
-    public String   customMessage = "";
-    public boolean  showMessage   = false;
+    public StopMode stopMode = StopMode.THIS_TREE;
+    public String customMessage = "";
+    public boolean showMessage = false;
 
     public StopNode(int x, int y) {
         super(NodeType.STOP, "Stop", x, y);
-        width = 120; height = 50;
+        width = 120;
+        height = 50;
     }
 
     @Override
     public String execute(ExecutionContext ctx) throws InterruptedException {
-        if (stopMode == StopMode.ALL_TREES) ctx.stopAllTrees();
-        else ctx.stopThisTree();
-        if (showMessage && !customMessage.isEmpty()) ctx.showMessage(customMessage);
+        if (stopMode == StopMode.ALL_TREES)
+            ctx.stopAllTrees();
+        else
+            ctx.stopThisTree();
+        if (showMessage && !customMessage.isEmpty())
+            ctx.showMessage(customMessage);
         return null;
     }
 
-    @Override public Color  nodeColor() { return new Color(180, 50, 50); }
-    @Override public String nodeIcon()  { return "\u25a0"; }
+    @Override
+    public Color nodeColor() {
+        return new Color(180, 50, 50);
+    }
+
+    @Override
+    public String nodeIcon() {
+        return "\u25a0";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  NODE FACTORY
+// NODE FACTORY
 // ═══════════════════════════════════════════════════════════════
 public class NodeFactory {
 
     public static BaseNode create(BaseNode.NodeType type, int x, int y) {
         switch (type) {
-            case WATCH_ZONE:   return new WatchZoneNode(x, y);
-            case CLICK:        return new ClickNode(x, y);
-            case SIMPLE_CLICK: return new SimpleClickNode(x, y);
-            case CONDITION:    return new ConditionNode(x, y);
-            case LOOP:         return new LoopNode(x, y);
-            case WAIT:         return new WaitNode(x, y);
-            case STOP:         return new StopNode(x, y);
-            case KEYBOARD:     return new KeyboardNode(x, y);
-            case IMAGE:        return new ImageNode(x, y);
-            case WATCH_CASE:   return new WatchCaseNode(x, y);
-            default:           throw new IllegalArgumentException("Unknown node type: " + type);
+            case WATCH_ZONE:
+                return new WatchZoneNode(x, y);
+            case CLICK:
+                return new ClickNode(x, y);
+            case SIMPLE_CLICK:
+                return new SimpleClickNode(x, y);
+            case CONDITION:
+                return new ConditionNode(x, y);
+            case LOOP:
+                return new LoopNode(x, y);
+            case WAIT:
+                return new WaitNode(x, y);
+            case STOP:
+                return new StopNode(x, y);
+            case KEYBOARD:
+                return new KeyboardNode(x, y);
+            case IMAGE:
+                return new ImageNode(x, y);
+            case WATCH_CASE:
+                return new WatchCaseNode(x, y);
+            default:
+                throw new IllegalArgumentException("Unknown node type: " + type);
         }
     }
 
     public static String displayName(BaseNode.NodeType type) {
         switch (type) {
-            case WATCH_ZONE:   return "Watch Zone";
-            case CLICK:        return "Click";
-            case SIMPLE_CLICK: return "Simple Click";
-            case CONDITION:    return "Condition";
-            case LOOP:         return "Loop";
-            case WAIT:         return "Wait";
-            case STOP:         return "Stop";
-            case KEYBOARD:     return "Keyboard";
-            case IMAGE:        return "Image";
-            case WATCH_CASE:   return "Watch Case";
-            default:           return type.name();
+            case WATCH_ZONE:
+                return "Watch Zone";
+            case CLICK:
+                return "Click";
+            case SIMPLE_CLICK:
+                return "Simple Click";
+            case CONDITION:
+                return "Condition";
+            case LOOP:
+                return "Loop";
+            case WAIT:
+                return "Wait";
+            case STOP:
+                return "Stop";
+            case KEYBOARD:
+                return "Keyboard";
+            case IMAGE:
+                return "Image";
+            case WATCH_CASE:
+                return "Watch Case";
+            default:
+                return type.name();
         }
     }
 
     public static String icon(BaseNode.NodeType type) {
         switch (type) {
-            case WATCH_ZONE:   return "\u25ce";
-            case CLICK:        return "\u2197";
-            case SIMPLE_CLICK: return "\u2295";
-            case CONDITION:    return "?";
-            case LOOP:         return "\u21ba";
-            case WAIT:         return "\u23f1";
-            case STOP:         return "\u25a0";
-            case KEYBOARD:     return "\u2328";
-            case IMAGE:        return "\ud83d\uddbc";
-            case WATCH_CASE:   return "\u25c9";
-            default:           return "?";
+            case WATCH_ZONE:
+                return "\u25ce";
+            case CLICK:
+                return "\u2197";
+            case SIMPLE_CLICK:
+                return "\u2295";
+            case CONDITION:
+                return "?";
+            case LOOP:
+                return "\u21ba";
+            case WAIT:
+                return "\u23f1";
+            case STOP:
+                return "\u25a0";
+            case KEYBOARD:
+                return "\u2328";
+            case IMAGE:
+                return "\ud83d\uddbc";
+            case WATCH_CASE:
+                return "\u25c9";
+            default:
+                return "?";
         }
     }
 
     public static Color color(BaseNode.NodeType type) {
         switch (type) {
-            case WATCH_ZONE:   return new Color(50, 130, 200);
-            case CLICK:        return new Color(80, 160, 80);
-            case SIMPLE_CLICK: return new Color(120, 60, 180);
-            case CONDITION:    return new Color(200, 140, 30);
-            case LOOP:         return new Color(180, 80, 80);
-            case WAIT:         return new Color(80, 150, 150);
-            case STOP:         return new Color(180, 50, 50);
-            case KEYBOARD:     return new Color(60, 120, 160);
-            case IMAGE:        return new Color(80, 120, 80);
-            case WATCH_CASE:   return new Color(90, 100, 115);
-            default:           return Color.GRAY;
+            case WATCH_ZONE:
+                return new Color(50, 130, 200);
+            case CLICK:
+                return new Color(80, 160, 80);
+            case SIMPLE_CLICK:
+                return new Color(120, 60, 180);
+            case CONDITION:
+                return new Color(200, 140, 30);
+            case LOOP:
+                return new Color(180, 80, 80);
+            case WAIT:
+                return new Color(80, 150, 150);
+            case STOP:
+                return new Color(180, 50, 50);
+            case KEYBOARD:
+                return new Color(60, 120, 160);
+            case IMAGE:
+                return new Color(80, 120, 80);
+            case WATCH_CASE:
+                return new Color(90, 100, 115);
+            default:
+                return Color.GRAY;
         }
     }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  KEYBOARD NODE
+// KEYBOARD NODE
 // ═══════════════════════════════════════════════════════════════
 class KeyboardNode extends BaseNode {
 
-    public int    mode           = 0;
-    public String typeText       = "";
-    public int    charDelayMs    = 50;
-    public String hotkeyCombo    = "";
-    public String singleKey      = "ENTER";
-    public int    repeatCount    = 1;
-    public int    repeatDelayMs  = 100;
+    public int mode = 0;
+    public String typeText = "";
+    public int charDelayMs = 50;
+    public String hotkeyCombo = "";
+    public String singleKey = "ENTER";
+    public int repeatCount = 1;
+    public int repeatDelayMs = 100;
 
     public KeyboardNode(int x, int y) {
         super(NodeType.KEYBOARD, "Keyboard", x, y);
@@ -399,10 +523,10 @@ class KeyboardNode extends BaseNode {
         java.awt.Robot robot = ctx.getRobot();
         int total = Math.max(1, repeatCount);
         for (int r = 0; r < total && ctx.isRunning(); r++) {
-            String rs = total > 1 ? "  (" + (r+1) + "/" + total + ")" : "";
+            String rs = total > 1 ? "  (" + (r + 1) + "/" + total + ")" : "";
             switch (mode) {
                 case 0:
-                    String preview = typeText.length() > 20 ? typeText.substring(0,20) + "\u2026" : typeText;
+                    String preview = typeText.length() > 20 ? typeText.substring(0, 20) + "\u2026" : typeText;
                     ctx.setHudStatus("\u2328 " + label, "Typing: \"" + preview + "\"" + rs);
                     typeText(robot, typeText, charDelayMs, ctx);
                     break;
@@ -415,7 +539,8 @@ class KeyboardNode extends BaseNode {
                     pressSingleKey(robot, singleKey);
                     break;
             }
-            if (r < total-1) Thread.sleep(repeatDelayMs);
+            if (r < total - 1)
+                Thread.sleep(repeatDelayMs);
         }
         ctx.setHudStatus("\u2328 " + label, "Done");
         return "Done";
@@ -428,19 +553,21 @@ class KeyboardNode extends BaseNode {
             if (text.charAt(i) == '[') {
                 int end = text.indexOf(']', i);
                 if (end > i) {
-                    String tag = text.substring(i+1, end);
+                    String tag = text.substring(i + 1, end);
                     if (tag.toUpperCase().startsWith("COMBO:")) {
                         pressHotkey(robot, tag.substring(6));
                     } else {
                         pressSingleKey(robot, tag.toUpperCase());
                     }
                     i = end + 1;
-                    if (delay > 0) Thread.sleep(delay);
+                    if (delay > 0)
+                        Thread.sleep(delay);
                     continue;
                 }
             }
             typeChar(robot, text.charAt(i));
-            if (delay > 0) Thread.sleep(delay);
+            if (delay > 0)
+                Thread.sleep(delay);
             i++;
         }
     }
@@ -449,66 +576,115 @@ class KeyboardNode extends BaseNode {
         try {
             boolean shift = Character.isUpperCase(ch) || "!@#$%^&*()_+{}|:\"<>?~".indexOf(ch) >= 0;
             int keyCode = java.awt.event.KeyEvent.getExtendedKeyCodeForChar(ch);
-            if (keyCode == java.awt.event.KeyEvent.VK_UNDEFINED) return;
-            if (shift) robot.keyPress(java.awt.event.KeyEvent.VK_SHIFT);
+            if (keyCode == java.awt.event.KeyEvent.VK_UNDEFINED)
+                return;
+            if (shift)
+                robot.keyPress(java.awt.event.KeyEvent.VK_SHIFT);
             robot.keyPress(keyCode);
             robot.keyRelease(keyCode);
-            if (shift) robot.keyRelease(java.awt.event.KeyEvent.VK_SHIFT);
-        } catch (Exception ignored) {}
+            if (shift)
+                robot.keyRelease(java.awt.event.KeyEvent.VK_SHIFT);
+        } catch (Exception ignored) {
+        }
     }
 
     private void pressHotkey(java.awt.Robot robot, String combo) {
         String[] parts = combo.toLowerCase().split("\\+");
         int[] codes = new int[parts.length];
-        for (int i = 0; i < parts.length; i++) codes[i] = keyNameToCode(parts[i].trim());
-        for (int code : codes) if (code != -1) robot.keyPress(code);
-        try { Thread.sleep(30); } catch (InterruptedException ignored) {}
-        for (int i = codes.length-1; i >= 0; i--) if (codes[i] != -1) robot.keyRelease(codes[i]);
+        for (int i = 0; i < parts.length; i++)
+            codes[i] = keyNameToCode(parts[i].trim());
+        for (int code : codes)
+            if (code != -1)
+                robot.keyPress(code);
+        try {
+            Thread.sleep(30);
+        } catch (InterruptedException ignored) {
+        }
+        for (int i = codes.length - 1; i >= 0; i--)
+            if (codes[i] != -1)
+                robot.keyRelease(codes[i]);
     }
 
     private void pressSingleKey(java.awt.Robot robot, String keyName) {
         int code = keyNameToCode(keyName.toLowerCase().trim());
         if (code != -1) {
             robot.keyPress(code);
-            try { Thread.sleep(30); } catch (InterruptedException ignored) {}
+            try {
+                Thread.sleep(30);
+            } catch (InterruptedException ignored) {
+            }
             robot.keyRelease(code);
         }
     }
 
     static int keyNameToCode(String name) {
         switch (name) {
-            case "enter":      return java.awt.event.KeyEvent.VK_ENTER;
-            case "escape": case "esc": return java.awt.event.KeyEvent.VK_ESCAPE;
-            case "tab":        return java.awt.event.KeyEvent.VK_TAB;
-            case "space":      return java.awt.event.KeyEvent.VK_SPACE;
-            case "backspace":  return java.awt.event.KeyEvent.VK_BACK_SPACE;
-            case "delete":     return java.awt.event.KeyEvent.VK_DELETE;
-            case "up":         return java.awt.event.KeyEvent.VK_UP;
-            case "down":       return java.awt.event.KeyEvent.VK_DOWN;
-            case "left":       return java.awt.event.KeyEvent.VK_LEFT;
-            case "right":      return java.awt.event.KeyEvent.VK_RIGHT;
-            case "home":       return java.awt.event.KeyEvent.VK_HOME;
-            case "end":        return java.awt.event.KeyEvent.VK_END;
-            case "pageup":     return java.awt.event.KeyEvent.VK_PAGE_UP;
-            case "pagedown":   return java.awt.event.KeyEvent.VK_PAGE_DOWN;
-            case "ctrl": case "control": return java.awt.event.KeyEvent.VK_CONTROL;
-            case "alt":        return java.awt.event.KeyEvent.VK_ALT;
-            case "shift":      return java.awt.event.KeyEvent.VK_SHIFT;
-            case "meta": case "cmd": case "win": return java.awt.event.KeyEvent.VK_META;
-            case "f1":  return java.awt.event.KeyEvent.VK_F1;
-            case "f2":  return java.awt.event.KeyEvent.VK_F2;
-            case "f3":  return java.awt.event.KeyEvent.VK_F3;
-            case "f4":  return java.awt.event.KeyEvent.VK_F4;
-            case "f5":  return java.awt.event.KeyEvent.VK_F5;
-            case "f6":  return java.awt.event.KeyEvent.VK_F6;
-            case "f7":  return java.awt.event.KeyEvent.VK_F7;
-            case "f8":  return java.awt.event.KeyEvent.VK_F8;
-            case "f9":  return java.awt.event.KeyEvent.VK_F9;
-            case "f10": return java.awt.event.KeyEvent.VK_F10;
-            case "f11": return java.awt.event.KeyEvent.VK_F11;
-            case "f12": return java.awt.event.KeyEvent.VK_F12;
+            case "enter":
+                return java.awt.event.KeyEvent.VK_ENTER;
+            case "escape":
+            case "esc":
+                return java.awt.event.KeyEvent.VK_ESCAPE;
+            case "tab":
+                return java.awt.event.KeyEvent.VK_TAB;
+            case "space":
+                return java.awt.event.KeyEvent.VK_SPACE;
+            case "backspace":
+                return java.awt.event.KeyEvent.VK_BACK_SPACE;
+            case "delete":
+                return java.awt.event.KeyEvent.VK_DELETE;
+            case "up":
+                return java.awt.event.KeyEvent.VK_UP;
+            case "down":
+                return java.awt.event.KeyEvent.VK_DOWN;
+            case "left":
+                return java.awt.event.KeyEvent.VK_LEFT;
+            case "right":
+                return java.awt.event.KeyEvent.VK_RIGHT;
+            case "home":
+                return java.awt.event.KeyEvent.VK_HOME;
+            case "end":
+                return java.awt.event.KeyEvent.VK_END;
+            case "pageup":
+                return java.awt.event.KeyEvent.VK_PAGE_UP;
+            case "pagedown":
+                return java.awt.event.KeyEvent.VK_PAGE_DOWN;
+            case "ctrl":
+            case "control":
+                return java.awt.event.KeyEvent.VK_CONTROL;
+            case "alt":
+                return java.awt.event.KeyEvent.VK_ALT;
+            case "shift":
+                return java.awt.event.KeyEvent.VK_SHIFT;
+            case "meta":
+            case "cmd":
+            case "win":
+                return java.awt.event.KeyEvent.VK_META;
+            case "f1":
+                return java.awt.event.KeyEvent.VK_F1;
+            case "f2":
+                return java.awt.event.KeyEvent.VK_F2;
+            case "f3":
+                return java.awt.event.KeyEvent.VK_F3;
+            case "f4":
+                return java.awt.event.KeyEvent.VK_F4;
+            case "f5":
+                return java.awt.event.KeyEvent.VK_F5;
+            case "f6":
+                return java.awt.event.KeyEvent.VK_F6;
+            case "f7":
+                return java.awt.event.KeyEvent.VK_F7;
+            case "f8":
+                return java.awt.event.KeyEvent.VK_F8;
+            case "f9":
+                return java.awt.event.KeyEvent.VK_F9;
+            case "f10":
+                return java.awt.event.KeyEvent.VK_F10;
+            case "f11":
+                return java.awt.event.KeyEvent.VK_F11;
+            case "f12":
+                return java.awt.event.KeyEvent.VK_F12;
             default:
-                if (name.length()==1) {
+                if (name.length() == 1) {
                     int code = java.awt.event.KeyEvent.getExtendedKeyCodeForChar(name.charAt(0));
                     return code != java.awt.event.KeyEvent.VK_UNDEFINED ? code : -1;
                 }
@@ -516,59 +692,76 @@ class KeyboardNode extends BaseNode {
         }
     }
 
-    @Override public Color  nodeColor() { return new Color(60, 120, 160); }
-    @Override public String nodeIcon()  { return "\u2328"; }
+    @Override
+    public Color nodeColor() {
+        return new Color(60, 120, 160);
+    }
+
+    @Override
+    public String nodeIcon() {
+        return "\u2328";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  IMAGE MATCHER
+// IMAGE MATCHER
 // ═══════════════════════════════════════════════════════════════
 class ImageMatcher {
 
     public static Point findTemplate(java.awt.image.BufferedImage tmpl,
-                                     java.awt.image.BufferedImage zone,
-                                     int thresholdPct) {
+            java.awt.image.BufferedImage zone,
+            int thresholdPct) {
         double[] result = findTemplateWithScore(tmpl, zone, thresholdPct);
-        if (result == null) return null;
-        return new Point((int)result[0], (int)result[1]);
+        if (result == null)
+            return null;
+        return new Point((int) result[0], (int) result[1]);
     }
 
     public static double[] findTemplateWithScore(java.awt.image.BufferedImage tmpl,
-                                                  java.awt.image.BufferedImage zone,
-                                                  int thresholdPct) {
-        if (tmpl == null || zone == null) return null;
+            java.awt.image.BufferedImage zone,
+            int thresholdPct) {
+        if (tmpl == null || zone == null)
+            return null;
         int tw = tmpl.getWidth(), th = tmpl.getHeight();
-        int zw = zone.getWidth(),  zh = zone.getHeight();
-        if (tw > zw || th > zh) return null;
+        int zw = zone.getWidth(), zh = zone.getHeight();
+        if (tw > zw || th > zh)
+            return null;
 
         int step = Math.max(1, Math.min(tw, th) / 6);
-        double best = 0; int bestX = -1, bestY = -1;
+        double best = 0;
+        int bestX = -1, bestY = -1;
 
         for (int y = 0; y <= zh - th; y += step)
             for (int x = 0; x <= zw - tw; x += step) {
                 double score = matchScore(tmpl, zone, x, y, tw, th);
-                if (score > best) { best = score; bestX = x; bestY = y; }
+                if (score > best) {
+                    best = score;
+                    bestX = x;
+                    bestY = y;
+                }
             }
         if (best * 100 >= thresholdPct && bestX >= 0)
-            return new double[]{ bestX + tw/2.0, bestY + th/2.0, best * 100 };
+            return new double[] { bestX + tw / 2.0, bestY + th / 2.0, best * 100 };
         return null;
     }
 
     private static double matchScore(java.awt.image.BufferedImage tmpl,
-                                     java.awt.image.BufferedImage zone,
-                                     int ox, int oy, int tw, int th) {
-        int samples = 0; long totalDiff = 0;
+            java.awt.image.BufferedImage zone,
+            int ox, int oy, int tw, int th) {
+        int samples = 0;
+        long totalDiff = 0;
         int step = Math.max(1, Math.min(tw, th) / 8);
         for (int y = 0; y < th; y += step)
             for (int x = 0; x < tw; x += step) {
                 Color tc = new Color(tmpl.getRGB(x, y));
                 Color rc = new Color(zone.getRGB(ox + x, oy + y));
-                totalDiff += Math.abs(tc.getRed()   - rc.getRed())
-                           + Math.abs(tc.getGreen() - rc.getGreen())
-                           + Math.abs(tc.getBlue()  - rc.getBlue());
+                totalDiff += Math.abs(tc.getRed() - rc.getRed())
+                        + Math.abs(tc.getGreen() - rc.getGreen())
+                        + Math.abs(tc.getBlue() - rc.getBlue());
                 samples++;
             }
-        if (samples == 0) return 0;
+        if (samples == 0)
+            return 0;
         return 1.0 - (double) totalDiff / (samples * 255 * 3);
     }
 }

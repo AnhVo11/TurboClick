@@ -91,7 +91,7 @@ public class NodeCanvas extends JPanel {
         public int bendOffset = 40;
         public boolean selected = false;
 
-        Arrow(String from, String port, String to, String label) {
+        public Arrow(String from, String port, String to, String label) {
             fromNodeId = from;
             fromPort = port;
             toNodeId = to;
@@ -232,6 +232,10 @@ public class NodeCanvas extends JPanel {
 
     public Map<String, BaseNode> getNodes() {
         return nodes;
+    }
+
+    public List<Arrow> getArrows() {
+        return arrows;
     }
 
     public BaseNode getSelectedNode() {
