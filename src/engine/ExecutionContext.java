@@ -11,67 +11,127 @@ import java.util.List;
 // ═══════════════════════════════════════════════════════════════
 public class ExecutionContext {
 
-    private volatile boolean running      = true;
-    private          java.util.Map<String, nodes.BaseNode> nodeMap;
-    private volatile boolean treeStopped  = false;
-    private final    Robot   robot;
-    private final    String  treeId;
-    private          TreeStopCallback stopAllCallback;
-    private          HudCallback      hudCallback;
-    private          MessageCallback  msgCallback;
+    private volatile boolean running = true;
+    private java.util.Map<String, nodes.BaseNode> nodeMap;
+    private volatile boolean treeStopped = false;
+    private final Robot robot;
+    private final String treeId;
+    private TreeStopCallback stopAllCallback;
+    private HudCallback hudCallback;
+    private MessageCallback msgCallback;
+    private LogCallback logCallback;
 
     public ExecutionContext(Robot robot, String treeId) {
-        this.robot  = robot;
+        this.robot = robot;
         this.treeId = treeId;
     }
 
     // ── Robot ────────────────────────────────────────────────
-    public Robot getRobot() { return robot; }
-    public java.util.Map<String, nodes.BaseNode> getNodeMap() { return nodeMap; }
-    public void setNodeMap(java.util.Map<String, nodes.BaseNode> m) { nodeMap = m; }
+    public Robot getRobot() {
+        return robot;
+    }
+
+    public java.util.Map<String, nodes.BaseNode> getNodeMap() {
+        return nodeMap;
+    }
+
+    public void setNodeMap(java.util.Map<String, nodes.BaseNode> m) {
+        nodeMap = m;
+    }
 
     // ── Running state ────────────────────────────────────────
-    public boolean isRunning()    { return running && !treeStopped; }
-    public void    stopThisTree() { treeStopped = true; running = false; }
-    public void    forceStop()    { running = false; }
+    public boolean isRunning() {
+        return running && !treeStopped;
+    }
+
+    public void stopThisTree() {
+        treeStopped = true;
+        running = false;
+    }
+
+    public void forceStop() {
+        running = false;
+    }
 
     public void stopAllTrees() {
-        treeStopped = true; running = false;
-        if (stopAllCallback != null) stopAllCallback.stopAll();
+        treeStopped = true;
+        running = false;
+        if (stopAllCallback != null)
+            stopAllCallback.stopAll();
     }
 
     // ── Live HUD status ──────────────────────────────────────
-    private volatile String hudNodeName   = "";
-    private volatile String hudDetail     = "";
+    private volatile String hudNodeName = "";
+    private volatile String hudDetail = "";
     private volatile StatusCallback statusCallback;
 
     public void setHudStatus(String nodeName, String detail) {
-        hudNodeName = nodeName; hudDetail = detail;
-        if (statusCallback != null) statusCallback.update(nodeName, detail);
+        hudNodeName = nodeName;
+        hudDetail = detail;
+        if (statusCallback != null)
+            statusCallback.update(nodeName, detail);
+        if (logCallback != null)
+            logCallback.log(nodeName, detail);
     }
-    public void setStatusCallback(StatusCallback cb) { statusCallback = cb; }
-    public interface StatusCallback { void update(String nodeName, String detail); }
+
+    public void setStatusCallback(StatusCallback cb) {
+        statusCallback = cb;
+    }
+
+    public interface StatusCallback {
+        void update(String nodeName, String detail);
+    }
 
     // ── HUD countdown display ────────────────────────────────
     public void setCountdown(String imageName, int ms) {
-        if (hudCallback != null) hudCallback.showCountdown(imageName, ms);
+        if (hudCallback != null)
+            hudCallback.showCountdown(imageName, ms);
     }
+
     public void clearCountdown() {
-        if (hudCallback != null) hudCallback.clear();
+        if (hudCallback != null)
+            hudCallback.clear();
     }
 
     // ── Message notification ─────────────────────────────────
     public void showMessage(String msg) {
-        if (msgCallback != null) msgCallback.show(msg);
+        if (msgCallback != null)
+            msgCallback.show(msg);
     }
 
     // ── Callback setters ─────────────────────────────────────
-    public void setStopAllCallback(TreeStopCallback cb) { stopAllCallback = cb; }
-    public void setHudCallback(HudCallback cb)          { hudCallback     = cb; }
-    public void setMessageCallback(MessageCallback cb)  { msgCallback     = cb; }
+    public void setStopAllCallback(TreeStopCallback cb) {
+        stopAllCallback = cb;
+    }
+
+    public void setHudCallback(HudCallback cb) {
+        hudCallback = cb;
+    }
+
+    public void setMessageCallback(MessageCallback cb) {
+        msgCallback = cb;
+    }
+
+    public void setLogCallback(LogCallback cb) {
+        logCallback = cb;
+    }
 
     // ── Callback interfaces ──────────────────────────────────
-    public interface TreeStopCallback { void stopAll(); }
-    public interface HudCallback      { void showCountdown(String name, int ms); void clear(); }
-    public interface MessageCallback  { void show(String message); }
+    public interface TreeStopCallback {
+        void stopAll();
+    }
+
+    public interface HudCallback {
+        void showCountdown(String name, int ms);
+
+        void clear();
+    }
+
+    public interface MessageCallback {
+        void show(String message);
+    }
+
+    public interface LogCallback {
+        void log(String nodeName, String detail);
+    }
 }

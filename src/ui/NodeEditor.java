@@ -135,10 +135,12 @@ public class NodeEditor extends JPanel {
         addCheckBox("Log transitions", currentNode.logTransition, val -> currentNode.logTransition = val);
         addLabeledSpinner("Entry delay (ms)", currentNode.entryDelayMs, 0, 60000,
                 val -> currentNode.entryDelayMs = val);
-        addLabeledSpinner("Loop count (0=off)", Math.max(0, currentNode.nodeLoopCount - 1), 0, 999, val -> {
-            currentNode.nodeLoopCount = val < 1 ? 1 : val + 1;
-            canvas.refreshNode(currentNode);
-        });
+        if (currentNode.type != BaseNode.NodeType.IMAGE) {
+            addLabeledSpinner("Loop count (0=off)", Math.max(0, currentNode.nodeLoopCount - 1), 0, 999, val -> {
+                currentNode.nodeLoopCount = val < 1 ? 1 : val + 1;
+                canvas.refreshNode(currentNode);
+            });
+        }
 
         switch (currentNode.type) {
             case WATCH_ZONE:
@@ -1390,15 +1392,121 @@ public class NodeEditor extends JPanel {
     // =========================================================
     private void buildWait() {
         addSection("Wait Settings");
-        addCombo("Wait mode", new String[] { "Fixed delay", "Until found", "Until not found" }, 0, val -> {
+        String[] modes = { "Fixed delay", "Until found", "Until not found", "Countdown", "Wait until time" };
+        int curMode = getIntField("waitMode", 0);
+        // map enum ordinal safely
+        JPanel comboRow = rowPanel();
+        comboRow.add(fieldLabel("Wait mode"));
+        JComboBox<String> modeCombo = new JComboBox<>(modes);
+        modeCombo.setSelectedIndex(Math.min(curMode, modes.length - 1));
+        modeCombo.setBackground(INPUT_BG);
+        modeCombo.setForeground(TEXT);
+        modeCombo.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        modeCombo.setUI(new javax.swing.plaf.basic.BasicComboBoxUI());
+        modeCombo.setRenderer(new javax.swing.plaf.basic.BasicComboBoxRenderer() {
+            public java.awt.Component getListCellRendererComponent(JList l, Object v, int i2, boolean s, boolean f) {
+                JLabel lbl = (JLabel) super.getListCellRendererComponent(l, v, i2, s, f);
+                lbl.setBackground(s ? new Color(60, 60, 90) : INPUT_BG);
+                lbl.setForeground(TEXT);
+                lbl.setOpaque(true);
+                return lbl;
+            }
         });
-        addLabeledSpinner("Delay (ms)", getIntField("delayMs", 1000), 1, 600000, val -> setIntField("delayMs", val));
-        addLabeledSpinner("Timeout (ms, 0=inf)", getIntField("timeoutMs", 0), 0, 60000,
-                val -> setIntField("timeoutMs", val));
-        addLabeledSpinner("Poll interval (ms)", getIntField("pollMs", 500), 50, 10000,
-                val -> setIntField("pollMs", val));
-        addLabeledSpinner("Match %", getIntField("matchThreshold", 85), 10, 100,
-                val -> setIntField("matchThreshold", val));
+        modeCombo.addActionListener(e -> {
+            setIntField("waitMode", modeCombo.getSelectedIndex());
+            rebuild();
+        });
+        comboRow.add(modeCombo);
+        content.add(comboRow);
+
+        if (curMode == 0 || curMode == 3) {
+            // Fixed delay or Countdown — show interval picker
+            addSection("Duration");
+            String[] units = { "H", "Min", "Sec", "1/10", "1/100", "1/1000" };
+            JPanel unitHdr = new JPanel(new GridLayout(1, 6, 2, 0));
+            unitHdr.setBackground(BG);
+            unitHdr.setBorder(new javax.swing.border.EmptyBorder(4, 8, 0, 8));
+            unitHdr.setAlignmentX(LEFT_ALIGNMENT);
+            for (String u : units) {
+                JLabel l = new JLabel(u, SwingConstants.CENTER);
+                l.setFont(new Font("SansSerif", Font.PLAIN, 9));
+                l.setForeground(TEXT_DIM);
+                unitHdr.add(l);
+            }
+            content.add(unitHdr);
+
+            JPanel spRow = new JPanel(new GridLayout(1, 6, 2, 0));
+            spRow.setBackground(BG);
+            spRow.setBorder(new javax.swing.border.EmptyBorder(2, 8, 6, 8));
+            spRow.setAlignmentX(LEFT_ALIGNMENT);
+            long iv = getIntField("delayMs", 1000);
+            int ivH = (int) (iv / 3600000L), ivM = (int) ((iv % 3600000L) / 60000L);
+            int ivS = (int) ((iv % 60000L) / 1000L), ivT = (int) ((iv % 1000L) / 100L);
+            int ivHu = (int) ((iv % 100L) / 10L), ivTh = (int) (iv % 10L);
+            JSpinner[] sps = {
+                    nodeSpinner(ivH, 0, 23), nodeSpinner(ivM, 0, 59), nodeSpinner(ivS, 0, 59),
+                    nodeSpinner(ivT, 0, 9), nodeSpinner(ivHu, 0, 9), nodeSpinner(ivTh, 0, 9)
+            };
+            for (JSpinner sp : sps)
+                spRow.add(sp);
+            for (JSpinner sp : sps)
+                sp.addChangeListener(e -> {
+                    long h = ((Number) sps[0].getValue()).longValue(), m = ((Number) sps[1].getValue()).longValue();
+                    long s = ((Number) sps[2].getValue()).longValue(), t = ((Number) sps[3].getValue()).longValue();
+                    long hu = ((Number) sps[4].getValue()).longValue(), th = ((Number) sps[5].getValue()).longValue();
+                    setIntField("delayMs",
+                            (int) Math.max(1, h * 3600000L + m * 60000L + s * 1000L + t * 100L + hu * 10L + th));
+                });
+            content.add(spRow);
+            if (curMode == 3)
+                addInfo("⏳ Counts down live in the HUD bar");
+
+        } else if (curMode == 4) {
+            // Wait until time
+            addSection("Target Time");
+            JPanel timeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+            timeRow.setBackground(BG);
+            timeRow.setAlignmentX(LEFT_ALIGNMENT);
+            JLabel hLbl = new JLabel("Hour:");
+            hLbl.setForeground(TEXT_DIM);
+            hLbl.setFont(new Font("SansSerif", Font.PLAIN, 11));
+            JSpinner hourSp = new JSpinner(new SpinnerNumberModel(
+                    getIntField("targetHour", 9), 0, 23, 1));
+            hourSp.setPreferredSize(new Dimension(60, 24));
+            JSpinner.DefaultEditor he = (JSpinner.DefaultEditor) hourSp.getEditor();
+            he.getTextField().setBackground(INPUT_BG);
+            he.getTextField().setForeground(TEXT);
+            he.getTextField().setHorizontalAlignment(JTextField.CENTER);
+            JLabel mLbl = new JLabel("Min:");
+            mLbl.setForeground(TEXT_DIM);
+            mLbl.setFont(new Font("SansSerif", Font.PLAIN, 11));
+            JSpinner minSp = new JSpinner(new SpinnerNumberModel(
+                    getIntField("targetMinute", 0), 0, 59, 1));
+            minSp.setPreferredSize(new Dimension(60, 24));
+            JSpinner.DefaultEditor me = (JSpinner.DefaultEditor) minSp.getEditor();
+            me.getTextField().setBackground(INPUT_BG);
+            me.getTextField().setForeground(TEXT);
+            me.getTextField().setHorizontalAlignment(JTextField.CENTER);
+            hourSp.addChangeListener(e -> setIntField("targetHour",
+                    ((Number) hourSp.getValue()).intValue()));
+            minSp.addChangeListener(e -> setIntField("targetMinute",
+                    ((Number) minSp.getValue()).intValue()));
+            timeRow.add(hLbl);
+            timeRow.add(hourSp);
+            timeRow.add(mLbl);
+            timeRow.add(minSp);
+            content.add(timeRow);
+            addInfo("Waits until that clock time today.\nIf time already passed — skips and continues.");
+
+        } else {
+            // Until found / Until not found
+            addLabeledSpinner("Timeout (ms, 0=inf)", getIntField("timeoutMs", 0), 0, 600000,
+                    val -> setIntField("timeoutMs", val));
+            addLabeledSpinner("Poll interval (ms)", getIntField("pollMs", 500), 50, 10000,
+                    val -> setIntField("pollMs", val));
+            addLabeledSpinner("Match %", getIntField("matchThreshold", 85), 10, 100,
+                    val -> setIntField("matchThreshold", val));
+        }
     }
 
     // =========================================================
@@ -2303,7 +2411,10 @@ public class NodeEditor extends JPanel {
 
     private int getIntField(String name, int def) {
         try {
-            return (int) getField(currentNode, name).get(currentNode);
+            Object v = getField(currentNode, name).get(currentNode);
+            if (v instanceof Enum)
+                return ((Enum<?>) v).ordinal();
+            return ((Number) v).intValue();
         } catch (Exception e) {
             return def;
         }
@@ -2311,7 +2422,12 @@ public class NodeEditor extends JPanel {
 
     private void setIntField(String name, int val) {
         try {
-            getField(currentNode, name).set(currentNode, val);
+            java.lang.reflect.Field f = getField(currentNode, name);
+            if (f.getType().isEnum()) {
+                f.set(currentNode, f.getType().getEnumConstants()[val]);
+            } else {
+                f.set(currentNode, val);
+            }
         } catch (Exception ignored) {
         }
     }
@@ -2558,7 +2674,7 @@ public class NodeEditor extends JPanel {
         content.add(nfRow);
 
         addSection("Template Image");
-        buildCaptureSection("template", "captureRect");
+        buildCaptureSection("template", null);
         addLabeledSpinner("Match threshold %", getIntField("threshold", 85), 1, 100,
                 val -> setIntField("threshold", val));
     }

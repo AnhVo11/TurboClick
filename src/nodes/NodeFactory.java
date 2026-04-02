@@ -289,7 +289,7 @@ class LoopNode extends BaseNode {
 // ═══════════════════════════════════════════════════════════════
 class WaitNode extends BaseNode {
     public static enum WaitMode {
-        FIXED_DELAY, UNTIL_FOUND, UNTIL_NOT_FOUND
+        FIXED_DELAY, UNTIL_FOUND, UNTIL_NOT_FOUND, COUNTDOWN, WAIT_UNTIL_TIME
     }
 
     public WaitMode waitMode = WaitMode.FIXED_DELAY;
@@ -300,6 +300,20 @@ class WaitNode extends BaseNode {
     public Rectangle checkZone = null;
     public int matchThreshold = 85;
     public int pollMs = 500;
+    public int targetHour = 9;
+    public int targetMinute = 0;
+
+    private static String fmtMs(long ms) {
+        if (ms < 0)
+            ms = 0;
+        long h = ms / 3600000, m = (ms % 3600000) / 60000;
+        long s = (ms % 60000) / 1000, tenth = (ms % 1000) / 100;
+        if (h > 0)
+            return String.format("%d:%02d:%02d", h, m, s);
+        if (m > 0)
+            return String.format("%d:%02d.%d", m, s, tenth);
+        return String.format("%d.%ds", s, tenth);
+    }
 
     public WaitNode(int x, int y) {
         super(NodeType.WAIT, "Wait", x, y);
@@ -312,9 +326,46 @@ class WaitNode extends BaseNode {
         switch (waitMode) {
             case FIXED_DELAY:
                 long end = System.currentTimeMillis() + delayMs;
-                while (System.currentTimeMillis() < end && ctx.isRunning())
+                while (System.currentTimeMillis() < end && ctx.isRunning()) {
+                    long rem = end - System.currentTimeMillis();
+                    ctx.setHudStatus("\u23f1 " + label, fmtMs(rem));
                     Thread.sleep(50);
+                }
+                ctx.setHudStatus("\u23f1 " + label, "Done");
                 return "Done";
+
+            case COUNTDOWN: {
+                long endC = System.currentTimeMillis() + delayMs;
+                while (System.currentTimeMillis() < endC && ctx.isRunning()) {
+                    long rem = endC - System.currentTimeMillis();
+                    ctx.setHudStatus("\u23f1 " + label, "⏳ " + fmtMs(rem));
+                    Thread.sleep(50);
+                }
+                ctx.setHudStatus("\u23f1 " + label, "Done");
+                return "Done";
+            }
+
+            case WAIT_UNTIL_TIME: {
+                java.util.Calendar target = java.util.Calendar.getInstance();
+                target.set(java.util.Calendar.HOUR_OF_DAY, targetHour);
+                target.set(java.util.Calendar.MINUTE, targetMinute);
+                target.set(java.util.Calendar.SECOND, 0);
+                target.set(java.util.Calendar.MILLISECOND, 0);
+                // If time already passed today, skip
+                if (target.getTimeInMillis() <= System.currentTimeMillis()) {
+                    ctx.setHudStatus("\u23f1 " + label, "Time passed — skipping");
+                    return "Done";
+                }
+                while (System.currentTimeMillis() < target.getTimeInMillis() && ctx.isRunning()) {
+                    long rem = target.getTimeInMillis() - System.currentTimeMillis();
+                    ctx.setHudStatus("\u23f1 " + label,
+                            String.format("Wait until %02d:%02d  (%s)", targetHour, targetMinute, fmtMs(rem)));
+                    Thread.sleep(50);
+                }
+                ctx.setHudStatus("\u23f1 " + label, "Done");
+                return "Done";
+            }
+
             case UNTIL_FOUND:
             case UNTIL_NOT_FOUND:
                 if (template == null || checkZone == null)
@@ -328,6 +379,8 @@ class WaitNode extends BaseNode {
                         return "Done";
                     if (waitMode == WaitMode.UNTIL_NOT_FOUND && !found)
                         return "Done";
+                    long rem = deadline == Long.MAX_VALUE ? -1 : deadline - System.currentTimeMillis();
+                    ctx.setHudStatus("\u23f1 " + label, rem < 0 ? "Waiting..." : "Timeout in " + fmtMs(rem));
                     Thread.sleep(pollMs);
                 }
                 return "Timeout";

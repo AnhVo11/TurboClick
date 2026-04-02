@@ -28,6 +28,8 @@ public class TreeTab extends JPanel {
     private final NodeEditor editor;
     private RuleEngine engine;
     private Runnable onRunStateChanged;
+    private JTextArea logArea;
+    private boolean logVisible = false;
 
     public TreeTab(String name) {
         this.treeName = name;
@@ -52,8 +54,25 @@ public class TreeTab extends JPanel {
         body.add(palette, BorderLayout.NORTH);
         body.add(canvasRow, BorderLayout.CENTER);
 
+        logArea = new JTextArea();
+        logArea.setEditable(false);
+        logArea.setBackground(new Color(15, 15, 22));
+        logArea.setForeground(new Color(140, 200, 140));
+        logArea.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        logArea.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+        JScrollPane logScroll = new JScrollPane(logArea);
+        logScroll.setPreferredSize(new Dimension(0, 120));
+        logScroll.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(50, 50, 65)));
+        logScroll.setVisible(false);
+
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, body, logScroll);
+        split.setResizeWeight(1.0);
+        split.setDividerSize(0);
+        split.setBorder(null);
+        split.setBackground(new Color(22, 22, 28));
+
         add(buildToolbar(), BorderLayout.NORTH);
-        add(body, BorderLayout.CENTER);
+        add(split, BorderLayout.CENTER);
 
         palette.setTargetCanvas(canvas);
 
@@ -215,6 +234,8 @@ public class TreeTab extends JPanel {
                         "Load failed:\n" + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
         });
+        JButton logBtn = toolBtn("⬡ Log", new Color(90, 90, 120));
+        logBtn.addActionListener(e -> toggleLog());
 
         JButton zoomInBtn = toolBtn("+", new Color(90, 90, 120));
         JButton zoomOutBtn = toolBtn("-", new Color(90, 90, 120));
@@ -240,6 +261,8 @@ public class TreeTab extends JPanel {
         bar.add(zoomOutBtn);
         bar.add(zoomInBtn);
         bar.add(zoomRstBtn);
+        bar.add(Box.createHorizontalStrut(8));
+        bar.add(logBtn);
 
         setOnRunStateChanged(() -> SwingUtilities
                 .invokeLater(() -> dot.setForeground(treeRunning ? new Color(40, 220, 80) : new Color(60, 60, 80))));
@@ -268,6 +291,7 @@ public class TreeTab extends JPanel {
             engine = new RuleEngine(nodeMap, startId, ctx);
             engine.setOnNodeStart(n -> SwingUtilities.invokeLater(canvas::repaint));
             engine.setOnNodeFinish(n -> SwingUtilities.invokeLater(canvas::repaint));
+            ctx.setLogCallback((nodeName, detail) -> appendLog(nodeName, detail));
             engine.setOnTreeFinish(() -> {
                 treeRunning = false;
                 SwingUtilities.invokeLater(() -> {
@@ -329,6 +353,7 @@ public class TreeTab extends JPanel {
             engine = new RuleEngine(nodeMap, startId, ctx);
             engine.setOnNodeStart(n -> SwingUtilities.invokeLater(canvas::repaint));
             engine.setOnNodeFinish(n -> SwingUtilities.invokeLater(canvas::repaint));
+            ctx.setLogCallback((nodeName, detail) -> appendLog(nodeName, detail));
             engine.setOnTreeFinish(() -> {
                 treeRunning = false;
                 if (looping) {
@@ -429,12 +454,12 @@ public class TreeTab extends JPanel {
         JLabel nodeLbl = new JLabel("Starting…");
         nodeLbl.setFont(new Font("SansSerif", Font.PLAIN, 11));
         nodeLbl.setForeground(new Color(140, 200, 255));
-        nodeLbl.setPreferredSize(new Dimension(160, 18));
+        nodeLbl.setPreferredSize(new Dimension(220, 18));
 
         JLabel detailLbl = new JLabel("");
         detailLbl.setFont(new Font("Monospaced", Font.BOLD, 11));
         detailLbl.setForeground(new Color(80, 220, 120));
-        detailLbl.setPreferredSize(new Dimension(110, 18));
+        detailLbl.setPreferredSize(new Dimension(180, 18));
 
         hudNodeLbl = nodeLbl;
         hudDetailLbl = detailLbl;
@@ -475,7 +500,7 @@ public class TreeTab extends JPanel {
         pulse.start();
 
         runHud.setContentPane(bar);
-        runHud.setSize(580, 46);
+        runHud.setSize(720, 46);
         Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
         runHud.setLocation(screen.width / 2 - 290, 18);
         runHud.setVisible(true);
@@ -533,5 +558,25 @@ public class TreeTab extends JPanel {
 
     public NodeCanvas getCanvas() {
         return canvas;
+    }
+
+    private void toggleLog() {
+        logVisible = !logVisible;
+        Component logScroll = ((JSplitPane) getComponent(1)).getBottomComponent();
+        logScroll.setVisible(logVisible);
+        ((JSplitPane) getComponent(1)).setDividerSize(logVisible ? 4 : 0);
+        revalidate();
+        repaint();
+    }
+
+    private void appendLog(String nodeName, String detail) {
+        if (logArea == null)
+            return;
+        String time = new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
+        String line = "[" + time + "]  " + nodeName + "  →  " + detail + "\n";
+        SwingUtilities.invokeLater(() -> {
+            logArea.append(line);
+            logArea.setCaretPosition(logArea.getDocument().getLength());
+        });
     }
 }
