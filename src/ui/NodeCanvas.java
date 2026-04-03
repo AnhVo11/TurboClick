@@ -331,14 +331,14 @@ public class NodeCanvas extends JPanel {
                 return "\u21ba";
             case WAIT:
                 return "\u23f1";
-            case STOP:
-                return "\u25a0";
+            case MESSAGE:
+                return "\u2709";
             case KEYBOARD:
                 return "\u2328";
             case IMAGE:
                 return "\u25a3";
             case WATCH_CASE:
-                return "\u25c9";
+                return "\u2756";
             default:
                 return "\u2022";
         }
@@ -379,7 +379,10 @@ public class NodeCanvas extends JPanel {
         g2.fillOval(cx + 7, cy + 7, 22, 22);
         g2.setColor(Color.WHITE);
         String badge = nodeTypeBadge(ghostType);
-        Font bf = new Font("Dialog", Font.BOLD, 13);
+        boolean bigIcon2 = ghostType == BaseNode.NodeType.KEYBOARD
+                || ghostType == BaseNode.NodeType.SIMPLE_CLICK
+                || ghostType == BaseNode.NodeType.MESSAGE;
+        Font bf = new Font("Dialog", Font.BOLD, bigIcon2 ? 17 : 13);
         g2.setFont(bf);
         FontMetrics bfm = g2.getFontMetrics();
         g2.drawString(badge, cx + 7 + (22 - bfm.stringWidth(badge)) / 2,
@@ -500,7 +503,10 @@ public class NodeCanvas extends JPanel {
         g2.fillOval(x + 7, y + 7, 22, 22);
         g2.setColor(Color.WHITE);
         String badge = nodeTypeBadge(node.type);
-        Font bf = new Font("Dialog", Font.BOLD, 13);
+        boolean bigIcon = node.type == BaseNode.NodeType.KEYBOARD
+                || node.type == BaseNode.NodeType.SIMPLE_CLICK
+                || node.type == BaseNode.NodeType.MESSAGE;
+        Font bf = new Font("Dialog", Font.BOLD, bigIcon ? 17 : 13);
         g2.setFont(bf);
         FontMetrics bfm = g2.getFontMetrics();
         g2.drawString(badge, x + 7 + (22 - bfm.stringWidth(badge)) / 2,

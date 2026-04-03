@@ -161,8 +161,8 @@ public class NodeEditor extends JPanel {
             case WAIT:
                 buildWait();
                 break;
-            case STOP:
-                buildStop();
+            case MESSAGE:
+                buildMessage();
                 break;
             case KEYBOARD:
                 buildKeyboard();
@@ -1512,12 +1512,157 @@ public class NodeEditor extends JPanel {
     // =========================================================
     // STOP
     // =========================================================
-    private void buildStop() {
-        addSection("Stop Settings");
-        addCombo("Stop mode", new String[] { "This tree only", "All trees" }, 0, val -> {
+    private void buildMessage() {
+        addSection("Style");
+        int curStyle = getIntField("style", 0);
+        addCombo("Display style", new String[] { "Toast / HUD", "Floating Window" }, curStyle, val -> {
+            setIntField("style", val);
+            rebuild();
         });
-        addCheckBox("Show message", getBoolField("showMessage", false), val -> setBoolField("showMessage", val));
-        addLabeledField("Custom message", getStrField("customMessage", ""), val -> setStrField("customMessage", val));
+
+        addSection("Content");
+        if (curStyle == 1)
+            addLabeledField("Title", getStrField("title", "Alert"), val -> setStrField("title", val));
+        addLabeledField("Message", getStrField("message", "Your message here"),
+                val -> setStrField("message", val));
+
+        addSection("Timing");
+        addLabeledSpinner("Show for (seconds)", getIntField("displaySeconds", 3), 1, 300,
+                val -> setIntField("displaySeconds", val));
+        addCheckBox("Wait for user to dismiss", getBoolField("waitForDismiss", false),
+                val -> setBoolField("waitForDismiss", val));
+        addCheckBox("Pause task while shown", getBoolField("pauseTask", false),
+                val -> setBoolField("pauseTask", val));
+
+        addSection("Size");
+        addLabeledSpinner("Width", getIntField("boxWidth", 320), 100, 1200,
+                val -> setIntField("boxWidth", val));
+        addLabeledSpinner("Height", getIntField("boxHeight", 120), 60, 800,
+                val -> setIntField("boxHeight", val));
+
+        addSection("Position");
+        int curPos = getIntField("position", 0);
+        addCombo("Position", new String[] { "Center of screen", "Custom location" }, curPos, val -> {
+            setIntField("position", val);
+            rebuild();
+        });
+        if (curPos == 1) {
+            addLabeledSpinner("X", getIntField("customX", 200), 0, 3840, val -> setIntField("customX", val));
+            addLabeledSpinner("Y", getIntField("customY", 200), 0, 2160, val -> setIntField("customY", val));
+            JButton pickBtn = editorBtn("⊕ Pick on screen", new Color(50, 100, 180));
+            pickBtn.setAlignmentX(LEFT_ALIGNMENT);
+            JPanel pr = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+            pr.setBackground(BG);
+            pr.setAlignmentX(LEFT_ALIGNMENT);
+            pr.add(pickBtn);
+            content.add(pr);
+            pickBtn.addActionListener(e -> {
+                Window win = SwingUtilities.getWindowAncestor(this);
+                if (win != null)
+                    win.setVisible(false);
+                new Timer(300, ev -> {
+                    ((Timer) ev.getSource()).stop();
+                    showPositionPicker(win);
+                }).start();
+            });
+        }
+
+        addSection("Colors");
+        addColorPicker("Background color",
+                new Color(getIntField("bgColorR", 22), getIntField("bgColorG", 22), getIntField("bgColorB", 30)),
+                c -> {
+                    setIntField("bgColorR", c.getRed());
+                    setIntField("bgColorG", c.getGreen());
+                    setIntField("bgColorB", c.getBlue());
+                });
+        addColorPicker("Text color",
+                new Color(getIntField("textColorR", 220), getIntField("textColorG", 220),
+                        getIntField("textColorB", 230)),
+                c -> {
+                    setIntField("textColorR", c.getRed());
+                    setIntField("textColorG", c.getGreen());
+                    setIntField("textColorB", c.getBlue());
+                });
+        addColorPicker("Accent color",
+                new Color(getIntField("accentColorR", 80), getIntField("accentColorG", 140),
+                        getIntField("accentColorB", 255)),
+                c -> {
+                    setIntField("accentColorR", c.getRed());
+                    setIntField("accentColorG", c.getGreen());
+                    setIntField("accentColorB", c.getBlue());
+                });
+    }
+
+    private void showPositionPicker(Window parentWindow) {
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        JWindow overlay = new JWindow();
+        overlay.setAlwaysOnTop(true);
+        overlay.setBackground(new Color(0, 0, 0, 0));
+        overlay.setBounds(0, 0, screen.width, screen.height);
+        JPanel glass = new JPanel() {
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g;
+                g2.setColor(new Color(0, 0, 0, 60));
+                g2.fillRect(0, 0, getWidth(), getHeight());
+                String msg = "Click to set message position   [ESC = cancel]";
+                g2.setFont(new Font("SansSerif", Font.BOLD, 15));
+                FontMetrics fm = g2.getFontMetrics();
+                int tw = fm.stringWidth(msg);
+                g2.setColor(new Color(0, 0, 0, 160));
+                g2.fillRoundRect((getWidth() - tw) / 2 - 12, 18, tw + 24, 32, 10, 10);
+                g2.setColor(new Color(255, 200, 80));
+                g2.drawString(msg, (getWidth() - tw) / 2, 40);
+            }
+        };
+        glass.setOpaque(false);
+        glass.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+        glass.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                setIntField("customX", e.getX());
+                setIntField("customY", e.getY());
+                overlay.dispose();
+                if (parentWindow != null) {
+                    parentWindow.setVisible(true);
+                    parentWindow.toFront();
+                }
+                Timer t = new Timer(150, ev -> rebuild());
+                t.setRepeats(false);
+                t.start();
+            }
+        });
+        overlay.setContentPane(glass);
+        overlay.setVisible(true);
+    }
+
+    private interface ColorSetter {
+        void set(Color c);
+    }
+
+    private void addColorPicker(String label, Color current, ColorSetter setter) {
+        JPanel row = rowPanel();
+        row.add(fieldLabel(label));
+        JPanel swatch = new JPanel() {
+            protected void paintComponent(Graphics g) {
+                g.setColor(getBackground());
+                g.fillRoundRect(0, 0, getWidth(), getHeight(), 6, 6);
+                g.setColor(getBackground().darker());
+                g.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 6, 6);
+            }
+        };
+        swatch.setBackground(current);
+        swatch.setPreferredSize(new Dimension(40, 22));
+        swatch.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        swatch.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                Color chosen = JColorChooser.showDialog(NodeEditor.this, label, swatch.getBackground());
+                if (chosen != null) {
+                    swatch.setBackground(chosen);
+                    setter.set(chosen);
+                }
+            }
+        });
+        row.add(swatch);
+        content.add(row);
     }
 
     // =========================================================

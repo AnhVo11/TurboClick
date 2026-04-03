@@ -8,7 +8,7 @@ import java.util.List;
 public abstract class BaseNode {
 
     public enum NodeType {
-        WATCH_ZONE, CLICK, SIMPLE_CLICK, CONDITION, LOOP, WAIT, STOP, KEYBOARD, IMAGE, WATCH_CASE
+        WATCH_ZONE, CLICK, SIMPLE_CLICK, CONDITION, LOOP, WAIT, MESSAGE, KEYBOARD, IMAGE, WATCH_CASE
     }
 
     public enum RunState {

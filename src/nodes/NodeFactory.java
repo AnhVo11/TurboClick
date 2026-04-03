@@ -402,40 +402,141 @@ class WaitNode extends BaseNode {
 // ═══════════════════════════════════════════════════════════════
 // STOP NODE
 // ═══════════════════════════════════════════════════════════════
-class StopNode extends BaseNode {
-    public static enum StopMode {
-        THIS_TREE, ALL_TREES
-    }
+class MessageNode extends BaseNode {
+    // Style: 0=Toast HUD, 1=Floating Window
+    public int style = 0;
+    public String title = "Alert";
+    public String message = "Your message here";
+    public int displaySeconds = 3;
+    public boolean waitForDismiss = false;
+    public boolean pauseTask = false;
+    // Position: 0=Center, 1=Custom
+    public int position = 0;
+    public int customX = 200, customY = 200;
+    public int boxWidth = 320, boxHeight = 120;
+    // Colors stored as RGB ints
+    public int bgColorR = 22, bgColorG = 22, bgColorB = 30;
+    public int textColorR = 220, textColorG = 220, textColorB = 230;
+    public int accentColorR = 80, accentColorG = 140, accentColorB = 255;
 
-    public StopMode stopMode = StopMode.THIS_TREE;
-    public String customMessage = "";
-    public boolean showMessage = false;
-
-    public StopNode(int x, int y) {
-        super(NodeType.STOP, "Stop", x, y);
-        width = 120;
-        height = 50;
+    public MessageNode(int x, int y) {
+        super(NodeType.MESSAGE, "Message", x, y);
+        width = 160;
+        height = 60;
+        addOutputPort("Done");
     }
 
     @Override
     public String execute(ExecutionContext ctx) throws InterruptedException {
-        if (stopMode == StopMode.ALL_TREES)
-            ctx.stopAllTrees();
-        else
-            ctx.stopThisTree();
-        if (showMessage && !customMessage.isEmpty())
-            ctx.showMessage(customMessage);
-        return null;
+        Color bg = new Color(bgColorR, bgColorG, bgColorB);
+        Color fg = new Color(textColorR, textColorG, textColorB);
+        Color accent = new Color(accentColorR, accentColorG, accentColorB);
+
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            javax.swing.JWindow win = new javax.swing.JWindow();
+            win.setAlwaysOnTop(true);
+            win.setBackground(new Color(0, 0, 0, 0));
+
+            javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.BorderLayout(0, 0)) {
+                protected void paintComponent(java.awt.Graphics g) {
+                    java.awt.Graphics2D g2 = (java.awt.Graphics2D) g;
+                    g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                            java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                    g2.setColor(bg);
+                    g2.fillRoundRect(0, 0, getWidth(), getHeight(), 16, 16);
+                    g2.setColor(accent);
+                    if (style == 0)
+                        g2.fillRoundRect(0, 0, getWidth(), 3, 4, 4); // top bar toast
+                    else
+                        g2.fillRoundRect(0, 0, 4, getHeight(), 4, 4); // left bar window
+                }
+            };
+            panel.setOpaque(false);
+            panel.setBorder(javax.swing.BorderFactory.createEmptyBorder(12, 16, 12, 16));
+
+            javax.swing.JPanel textPanel = new javax.swing.JPanel();
+            textPanel.setLayout(new javax.swing.BoxLayout(textPanel, javax.swing.BoxLayout.Y_AXIS));
+            textPanel.setOpaque(false);
+
+            if (style == 1 && !title.isEmpty()) {
+                javax.swing.JLabel titleLbl = new javax.swing.JLabel(title);
+                titleLbl.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 13));
+                titleLbl.setForeground(accent);
+                textPanel.add(titleLbl);
+                textPanel.add(javax.swing.Box.createVerticalStrut(6));
+            }
+
+            javax.swing.JLabel msgLbl = new javax.swing.JLabel(
+                    "<html><body style='width:" + (boxWidth - 50) + "px'>" + message + "</body></html>");
+            msgLbl.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 12));
+            msgLbl.setForeground(fg);
+            textPanel.add(msgLbl);
+
+            panel.add(textPanel, java.awt.BorderLayout.CENTER);
+
+            if (waitForDismiss) {
+                javax.swing.JButton okBtn = new javax.swing.JButton("OK");
+                okBtn.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 11));
+                okBtn.setBackground(accent);
+                okBtn.setForeground(java.awt.Color.WHITE);
+                okBtn.setOpaque(true);
+                okBtn.setBorderPainted(false);
+                okBtn.setFocusPainted(false);
+                okBtn.addActionListener(e -> {
+                    win.dispose();
+                    latch.countDown();
+                });
+                javax.swing.JPanel btnRow = new javax.swing.JPanel(
+                        new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 4));
+                btnRow.setOpaque(false);
+                btnRow.add(okBtn);
+                panel.add(btnRow, java.awt.BorderLayout.SOUTH);
+            }
+
+            win.setContentPane(panel);
+            win.setSize(boxWidth, boxHeight);
+
+            // Position
+            java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+            if (position == 0) {
+                win.setLocation(screen.width / 2 - boxWidth / 2,
+                        screen.height / 2 - boxHeight / 2);
+            } else {
+                win.setLocation(customX, customY);
+            }
+
+            win.setVisible(true);
+
+            if (!waitForDismiss) {
+                new javax.swing.Timer(displaySeconds * 1000, e -> {
+                    win.dispose();
+                    latch.countDown();
+                }) {
+                    {
+                        setRepeats(false);
+                    }
+                }.start();
+            }
+        });
+
+        if (pauseTask || waitForDismiss) {
+            latch.await();
+        }
+
+        ctx.setHudStatus("\u2709 " + label, "Shown");
+        return "Done";
     }
 
     @Override
     public Color nodeColor() {
-        return new Color(180, 50, 50);
+        return new Color(180, 120, 40);
     }
 
     @Override
     public String nodeIcon() {
-        return "\u25a0";
+        return "\u2709";
     }
 }
 
@@ -458,8 +559,8 @@ public class NodeFactory {
                 return new LoopNode(x, y);
             case WAIT:
                 return new WaitNode(x, y);
-            case STOP:
-                return new StopNode(x, y);
+            case MESSAGE:
+                return new MessageNode(x, y);
             case KEYBOARD:
                 return new KeyboardNode(x, y);
             case IMAGE:
@@ -485,8 +586,8 @@ public class NodeFactory {
                 return "Loop";
             case WAIT:
                 return "Wait";
-            case STOP:
-                return "Stop";
+            case MESSAGE:
+                return "Message";
             case KEYBOARD:
                 return "Keyboard";
             case IMAGE:
@@ -512,8 +613,8 @@ public class NodeFactory {
                 return "\u21ba";
             case WAIT:
                 return "\u23f1";
-            case STOP:
-                return "\u25a0";
+            case MESSAGE:
+                return "\u2709";
             case KEYBOARD:
                 return "\u2328";
             case IMAGE:
@@ -539,8 +640,8 @@ public class NodeFactory {
                 return new Color(180, 80, 80);
             case WAIT:
                 return new Color(80, 150, 150);
-            case STOP:
-                return new Color(180, 50, 50);
+            case MESSAGE:
+                return new Color(180, 120, 40);
             case KEYBOARD:
                 return new Color(60, 120, 160);
             case IMAGE:

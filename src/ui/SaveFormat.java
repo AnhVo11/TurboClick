@@ -78,6 +78,21 @@ public class SaveFormat {
         public Integer repeatDelayMs = null;
         // Image node
         public Integer threshold = null;
+        // Message node
+        public Integer msgStyle = null;
+        public String msgTitle = null;
+        public String msgText = null;
+        public Integer msgDisplaySeconds = null;
+        public Boolean msgWaitForDismiss = null;
+        public Boolean msgPauseTask = null;
+        public Integer msgPosition = null;
+        public Integer msgCustomX = null;
+        public Integer msgCustomY = null;
+        public Integer msgBoxWidth = null;
+        public Integer msgBoxHeight = null;
+        public Integer msgBgR = null, msgBgG = null, msgBgB = null;
+        public Integer msgFgR = null, msgFgG = null, msgFgB = null;
+        public Integer msgAcR = null, msgAcG = null, msgAcB = null;
         // Watch Case
         public Integer wcPollIntervalMs = null;
         public Boolean wcLoopOnMatch = null;

@@ -69,6 +69,11 @@ public class TaskSerializer {
     }
 
     // ── Load ─────────────────────────────────────────────────
+    public static SaveFormat.TaskFile load(File file) throws Exception {
+        String json = new String(java.nio.file.Files.readAllBytes(file.toPath()));
+        return parseJson(json);
+    }
+
     public static SaveFormat.TaskFile load(String json) throws Exception {
         return parseJson(json);
     }
@@ -191,11 +196,27 @@ public class TaskSerializer {
                     d.checkZone = rectToArr(rect(node, "checkZone"));
                     break;
                 }
-                case STOP: {
-                    Object sm = getF(node, "stopMode");
-                    d.stopMode = sm != null ? sm.toString() : null;
-                    d.showMessage = boolF(node, "showMessage");
-                    d.customMessage = str(node, "customMessage");
+                case MESSAGE: {
+                    d.msgStyle = intF(node, "style");
+                    d.msgTitle = str(node, "title");
+                    d.msgText = str(node, "message");
+                    d.msgDisplaySeconds = intF(node, "displaySeconds");
+                    d.msgWaitForDismiss = boolF(node, "waitForDismiss");
+                    d.msgPauseTask = boolF(node, "pauseTask");
+                    d.msgPosition = intF(node, "position");
+                    d.msgCustomX = intF(node, "customX");
+                    d.msgCustomY = intF(node, "customY");
+                    d.msgBoxWidth = intF(node, "boxWidth");
+                    d.msgBoxHeight = intF(node, "boxHeight");
+                    d.msgBgR = intF(node, "bgColorR");
+                    d.msgBgG = intF(node, "bgColorG");
+                    d.msgBgB = intF(node, "bgColorB");
+                    d.msgFgR = intF(node, "textColorR");
+                    d.msgFgG = intF(node, "textColorG");
+                    d.msgFgB = intF(node, "textColorB");
+                    d.msgAcR = intF(node, "accentColorR");
+                    d.msgAcG = intF(node, "accentColorG");
+                    d.msgAcB = intF(node, "accentColorB");
                     break;
                 }
                 case KEYBOARD: {
@@ -355,20 +376,27 @@ public class TaskSerializer {
                     setF(node, "checkZone", arrToRect(d.checkZone));
                     break;
                 }
-                case STOP: {
-                    if (d.stopMode != null) {
-                        try {
-                            java.lang.reflect.Field smf = field(node, "stopMode");
-                            for (Object e : smf.getType().getEnumConstants())
-                                if (e.toString().equals(d.stopMode)) {
-                                    smf.set(node, e);
-                                    break;
-                                }
-                        } catch (Exception ignored) {
-                        }
-                    }
-                    setB(node, "showMessage", d.showMessage, false);
-                    setF(node, "customMessage", d.customMessage);
+                case MESSAGE: {
+                    setI(node, "style", d.msgStyle, 0);
+                    setF(node, "title", d.msgTitle);
+                    setF(node, "message", d.msgText);
+                    setI(node, "displaySeconds", d.msgDisplaySeconds, 3);
+                    setB(node, "waitForDismiss", d.msgWaitForDismiss, false);
+                    setB(node, "pauseTask", d.msgPauseTask, false);
+                    setI(node, "position", d.msgPosition, 0);
+                    setI(node, "customX", d.msgCustomX, 200);
+                    setI(node, "customY", d.msgCustomY, 200);
+                    setI(node, "boxWidth", d.msgBoxWidth, 320);
+                    setI(node, "boxHeight", d.msgBoxHeight, 120);
+                    setI(node, "bgColorR", d.msgBgR, 22);
+                    setI(node, "bgColorG", d.msgBgG, 22);
+                    setI(node, "bgColorB", d.msgBgB, 30);
+                    setI(node, "textColorR", d.msgFgR, 220);
+                    setI(node, "textColorG", d.msgFgG, 220);
+                    setI(node, "textColorB", d.msgFgB, 230);
+                    setI(node, "accentColorR", d.msgAcR, 80);
+                    setI(node, "accentColorG", d.msgAcG, 140);
+                    setI(node, "accentColorB", d.msgAcB, 255);
                     break;
                 }
                 case KEYBOARD: {
