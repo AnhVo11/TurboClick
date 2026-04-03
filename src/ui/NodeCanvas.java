@@ -945,12 +945,20 @@ public class NodeCanvas extends JPanel {
                 selectedArrow.selected = false;
                 selectedArrow = null;
             }
-            selectedNodes.clear();
             rubberRect = null;
             dragNode = hit;
             dragOffX = cv.x - hit.x;
             dragOffY = cv.y - hit.y;
-            selectNode(hit);
+            // If hit node is not in selection, clear and select just it
+            if (!selectedNodes.contains(hit)) {
+                selectedNodes.clear();
+                selectNode(hit);
+            } else {
+                // Keep existing selection, just update single node selection
+                selectedNode = hit;
+                if (onNodeSelected != null)
+                    onNodeSelected.accept(hit);
+            }
         } else {
             Arrow hitArrow = null;
             for (Arrow a : arrows) {
@@ -1074,8 +1082,19 @@ public class NodeCanvas extends JPanel {
         }
         if (dragNode != null) {
             Point cv = screenToCanvas(e.getPoint());
-            dragNode.x = Math.max(0, cv.x - dragOffX);
-            dragNode.y = Math.max(0, cv.y - dragOffY);
+            int newX = Math.max(0, cv.x - dragOffX);
+            int newY = Math.max(0, cv.y - dragOffY);
+            int dx = newX - dragNode.x;
+            int dy = newY - dragNode.y;
+            if (selectedNodes.size() > 1 && selectedNodes.contains(dragNode)) {
+                for (BaseNode n : selectedNodes) {
+                    n.x += dx;
+                    n.y += dy;
+                }
+            } else {
+                dragNode.x = newX;
+                dragNode.y = newY;
+            }
             repaint();
             notifyChanged();
         }
@@ -1185,6 +1204,37 @@ public class NodeCanvas extends JPanel {
                         JOptionPane.showMessageDialog(NodeCanvas.this, "Save failed:\n" + ex.getMessage(), "Error",
                                 JOptionPane.ERROR_MESSAGE);
                     }
+                });
+                addMenuItem(menu, "⧉ Duplicate selection", () -> {
+                    Map<String, String> idRemap = new HashMap<>();
+                    List<BaseNode> newNodes = new ArrayList<>();
+                    for (BaseNode n : new ArrayList<>(selectedNodes)) {
+                        BaseNode copy = NodeFactory.create(n.type, n.x + 40, n.y + 40);
+                        copy.label = n.label;
+                        copy.width = n.width;
+                        copy.height = n.height;
+                        copy.branchEnabled = n.branchEnabled;
+                        copy.entryDelayMs = n.entryDelayMs;
+                        copy.nodeLoopCount = n.nodeLoopCount;
+                        idRemap.put(n.id, copy.id);
+                        newNodes.add(copy);
+                        nodes.put(copy.id, copy);
+                    }
+                    // Re-wire internal arrows
+                    for (Arrow a : new ArrayList<>(arrows)) {
+                        String newFrom = idRemap.get(a.fromNodeId);
+                        String newTo = idRemap.get(a.toNodeId);
+                        if (newFrom != null && newTo != null) {
+                            BaseNode fromNode = nodes.get(newFrom);
+                            if (fromNode != null)
+                                fromNode.setPortTarget(a.fromPort, newTo);
+                            arrows.add(new Arrow(newFrom, a.fromPort, newTo, a.label));
+                        }
+                    }
+                    selectedNodes.clear();
+                    selectedNodes.addAll(newNodes);
+                    repaint();
+                    notifyChanged();
                 });
                 addMenuItem(menu, "🗑 Delete selection", () -> {
                     int r = JOptionPane.showConfirmDialog(NodeCanvas.this,
