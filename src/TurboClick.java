@@ -17,29 +17,29 @@ import com.github.kwhat.jnativehook.keyboard.NativeKeyListener;
 /**
  * TurboClick — main entry point.
  * Top-level window with:
- *   • Left sidebar: mode switcher (Smart Click / Simple Click)
- *   • Center: either the tree tab system or the Simple Click panel
+ * • Left sidebar: mode switcher (Smart Click / Simple Click)
+ * • Center: either the tree tab system or the Simple Click panel
  */
 public class TurboClick implements NativeKeyListener {
 
-    static TurboClick   instance;
-    static JFrame       frame;
-    static JPanel       centerPanel;   // swaps between smartPanel and simplePanel
-    static CardLayout   centerLayout;
+    static TurboClick instance;
+    static JFrame frame;
+    static JPanel centerPanel; // swaps between smartPanel and simplePanel
+    static CardLayout centerLayout;
 
     // ── Smart Click tab system ────────────────────────────────
-    static JPanel              tabBar;
-    static JPanel              tabContent;
-    static List<TreeTab>       treeTabs    = new ArrayList<>();
-    static TreeTab             activeTab   = null;
-    static int                 tabCounter  = 1;
+    static JPanel tabBar;
+    static JPanel tabContent;
+    static List<TreeTab> treeTabs = new ArrayList<>();
+    static TreeTab activeTab = null;
+    static int tabCounter = 1;
 
     // ── Simple Click state ────────────────────────────────────
     static SimpleClickPanel simpleClickPanel;
 
     // ── Hotkey (global stop all) ──────────────────────────────
-    static int     globalStopKey  = NativeKeyEvent.VC_F8;
-    static String  globalStopName = "F8";
+    static int globalStopKey = NativeKeyEvent.VC_F8;
+    static String globalStopName = "F8";
 
     // ──────────────────────────────────────────────────────────
     public static void main(String[] args) {
@@ -50,10 +50,15 @@ public class TurboClick implements NativeKeyListener {
         try {
             GlobalScreen.registerNativeHook();
             GlobalScreen.addNativeKeyListener(instance);
-        } catch (NativeHookException e) { System.err.println("Hook: "+e.getMessage()); }
+        } catch (NativeHookException e) {
+            System.err.println("Hook: " + e.getMessage());
+        }
         SwingUtilities.invokeLater(TurboClick::buildUI);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            try { GlobalScreen.unregisterNativeHook(); } catch (NativeHookException ignored) {}
+            try {
+                GlobalScreen.unregisterNativeHook();
+            } catch (NativeHookException ignored) {
+            }
         }));
     }
 
@@ -75,7 +80,7 @@ public class TurboClick implements NativeKeyListener {
 
         // ── Center — card layout ──────────────────────────────
         centerLayout = new CardLayout();
-        centerPanel  = new JPanel(centerLayout);
+        centerPanel = new JPanel(centerLayout);
         centerPanel.setBackground(new Color(22, 22, 28));
 
         // Smart Click area (tab system)
@@ -112,10 +117,11 @@ public class TurboClick implements NativeKeyListener {
 
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
         left.setOpaque(false);
-        left.add(title); left.add(subtitle);
+        left.add(title);
+        left.add(subtitle);
 
         // Global hotkey info
-        JLabel hotkey = new JLabel("Global stop: ["+globalStopName+"]");
+        JLabel hotkey = new JLabel("Global stop: [" + globalStopName + "]");
         hotkey.setFont(new Font("SansSerif", Font.PLAIN, 10));
         hotkey.setForeground(new Color(100, 100, 120));
 
@@ -139,21 +145,35 @@ public class TurboClick implements NativeKeyListener {
         side.add(lbl);
         side.add(Box.createVerticalStrut(8));
 
-        JButton smartBtn  = modeBtn("Build Smart Click", true);
+        JButton smartBtn = modeBtn("Build Smart Click", true);
         JButton simpleBtn = modeBtn("Build Simple Click", false);
 
-        smartBtn.addActionListener(e  -> { centerLayout.show(centerPanel,"smart");  setModeActive(smartBtn, simpleBtn); });
-        simpleBtn.addActionListener(e -> { centerLayout.show(centerPanel,"simple"); setModeActive(simpleBtn, smartBtn); });
+        smartBtn.addActionListener(e -> {
+            centerLayout.show(centerPanel, "smart");
+            setModeActive(smartBtn, simpleBtn);
+        });
+        simpleBtn.addActionListener(e -> {
+            centerLayout.show(centerPanel, "simple");
+            setModeActive(simpleBtn, smartBtn);
+        });
 
         side.add(smartBtn);
         side.add(Box.createVerticalStrut(4));
         side.add(simpleBtn);
         side.add(Box.createVerticalGlue());
 
+        // Settings button
+        JButton settingsBtn = modeBtn("⚙ Settings", false);
+        settingsBtn.setBackground(new Color(28, 28, 38));
+        settingsBtn.setForeground(new Color(120, 120, 150));
+        settingsBtn.addActionListener(e -> ui.SettingsPanel.showDialog(frame));
+        side.add(settingsBtn);
+        side.add(Box.createVerticalStrut(4));
+
         // Version
         JLabel ver = new JLabel("  v2.0");
-        ver.setForeground(new Color(60,60,80));
-        ver.setFont(new Font("SansSerif",Font.PLAIN,9));
+        ver.setForeground(new Color(60, 60, 80));
+        ver.setFont(new Font("SansSerif", Font.PLAIN, 9));
         side.add(ver);
         side.add(Box.createVerticalStrut(10));
 
@@ -162,18 +182,20 @@ public class TurboClick implements NativeKeyListener {
     }
 
     static void setModeActive(JButton active, JButton inactive) {
-        active.setBackground(new Color(40,100,180));
+        active.setBackground(new Color(40, 100, 180));
         active.setForeground(Color.WHITE);
-        inactive.setBackground(new Color(28,28,38));
-        inactive.setForeground(new Color(160,160,180));
+        inactive.setBackground(new Color(28, 28, 38));
+        inactive.setForeground(new Color(160, 160, 180));
     }
 
     static JButton modeBtn(String text, boolean active) {
-        JButton b = new JButton("<html>"+text.replace("\n","<br>")+"</html>");
+        JButton b = new JButton("<html>" + text.replace("\n", "<br>") + "</html>");
         b.setFont(new Font("SansSerif", Font.BOLD, 11));
-        b.setBackground(active ? new Color(40,100,180) : new Color(28,28,38));
-        b.setForeground(active ? Color.WHITE : new Color(160,160,180));
-        b.setOpaque(true); b.setBorderPainted(false); b.setFocusPainted(false);
+        b.setBackground(active ? new Color(40, 100, 180) : new Color(28, 28, 38));
+        b.setForeground(active ? Color.WHITE : new Color(160, 160, 180));
+        b.setOpaque(true);
+        b.setBorderPainted(false);
+        b.setFocusPainted(false);
         b.setAlignmentX(Component.LEFT_ALIGNMENT);
         b.setMaximumSize(new Dimension(130, 54));
         b.setPreferredSize(new Dimension(130, 54));
@@ -183,34 +205,39 @@ public class TurboClick implements NativeKeyListener {
 
     // ── Smart Panel (tab bar + canvas area) ───────────────────
     static JPanel buildSmartPanel() {
-        JPanel panel = new JPanel(new BorderLayout(0,0));
+        JPanel panel = new JPanel(new BorderLayout(0, 0));
         panel.setBackground(new Color(22, 22, 28));
 
         // Tab bar at top
         tabBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0)) {
-            public Dimension getPreferredSize() { return new Dimension(super.getPreferredSize().width, 38); }
+            public Dimension getPreferredSize() {
+                return new Dimension(super.getPreferredSize().width, 38);
+            }
         };
         tabBar.setBackground(new Color(18, 18, 24));
-        tabBar.setBorder(BorderFactory.createMatteBorder(0,0,2,0,new Color(50,50,70)));
+        tabBar.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, new Color(50, 50, 70)));
         tabBar.setPreferredSize(new Dimension(0, 38));
 
         // Add tab "+" button
         JButton addTabBtn = new JButton("+");
-        addTabBtn.setFont(new Font("SansSerif",Font.BOLD,14));
-        addTabBtn.setBackground(new Color(18,18,24));
-        addTabBtn.setForeground(new Color(80,140,255));
-        addTabBtn.setBorderPainted(false); addTabBtn.setFocusPainted(false);
+        addTabBtn.setFont(new Font("SansSerif", Font.BOLD, 14));
+        addTabBtn.setBackground(new Color(18, 18, 24));
+        addTabBtn.setForeground(new Color(80, 140, 255));
+        addTabBtn.setBorderPainted(false);
+        addTabBtn.setFocusPainted(false);
         addTabBtn.setOpaque(true);
-        addTabBtn.setPreferredSize(new Dimension(36,38));
+        addTabBtn.setMinimumSize(new Dimension(42, 38));
+        addTabBtn.setPreferredSize(new Dimension(42, 38));
+        addTabBtn.setMaximumSize(new Dimension(42, 38));
         addTabBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         addTabBtn.addActionListener(e -> addNewTreeTab());
         tabBar.add(addTabBtn);
 
         // Tab content area
         tabContent = new JPanel(new CardLayout());
-        tabContent.setBackground(new Color(22,22,28));
+        tabContent.setBackground(new Color(22, 22, 28));
 
-        panel.add(tabBar,     BorderLayout.NORTH);
+        panel.add(tabBar, BorderLayout.NORTH);
         panel.add(tabContent, BorderLayout.CENTER);
         return panel;
     }
@@ -224,7 +251,7 @@ public class TurboClick implements NativeKeyListener {
         // Tab header button
         JPanel tabHeader = buildTabHeader(name, tab);
         // Insert before the "+" button
-        tabBar.add(tabHeader, tabBar.getComponentCount()-1);
+        tabBar.add(tabHeader, tabBar.getComponentCount() - 1);
         tabBar.revalidate();
 
         tabContent.add(tab, tab.treeId);
@@ -232,49 +259,69 @@ public class TurboClick implements NativeKeyListener {
 
         tab.setOnRunStateChanged(() -> {
             // Refresh tab header dot
-            tabBar.revalidate(); tabBar.repaint();
+            tabBar.revalidate();
+            tabBar.repaint();
         });
     }
 
     static JPanel buildTabHeader(String name, TreeTab tab) {
-        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        header.setBackground(new Color(18,18,24));
-        header.setPreferredSize(new Dimension(140, 38));
+        JPanel header = new JPanel(new BorderLayout(4, 0));
+        header.setBackground(new Color(18, 18, 24));
+        header.setPreferredSize(new Dimension(150, 38));
+        header.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 6));
         header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
         JLabel dot = new JLabel("●");
-        dot.setFont(new Font("SansSerif",Font.PLAIN,10));
-        dot.setForeground(new Color(60,60,80));
+        dot.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        dot.setForeground(new Color(60, 60, 80));
 
         JLabel nameLbl = new JLabel(name);
-        nameLbl.setFont(new Font("SansSerif",Font.PLAIN,12));
-        nameLbl.setForeground(new Color(180,180,200));
+        nameLbl.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        nameLbl.setForeground(new Color(180, 180, 200));
 
         JLabel closeBtn = new JLabel("×");
-        closeBtn.setFont(new Font("SansSerif",Font.BOLD,14));
-        closeBtn.setForeground(new Color(100,100,120));
+        closeBtn.setFont(new Font("SansSerif", Font.BOLD, 14));
+        closeBtn.setForeground(new Color(100, 100, 120));
         closeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        closeBtn.addMouseListener(new MouseAdapter(){
-            public void mouseClicked(MouseEvent e){ e.consume(); closeTab(tab); }
-            public void mouseEntered(MouseEvent e){ closeBtn.setForeground(new Color(220,80,80)); }
-            public void mouseExited(MouseEvent e) { closeBtn.setForeground(new Color(100,100,120)); }
+        closeBtn.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                e.consume();
+                closeTab(tab);
+            }
+
+            public void mouseEntered(MouseEvent e) {
+                closeBtn.setForeground(new Color(220, 80, 80));
+            }
+
+            public void mouseExited(MouseEvent e) {
+                closeBtn.setForeground(new Color(100, 100, 120));
+            }
         });
 
-        header.add(dot); header.add(nameLbl); header.add(closeBtn);
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 9));
+        left.setOpaque(false);
+        left.add(dot);
+        left.add(nameLbl);
+        header.add(left, BorderLayout.CENTER);
+        header.add(closeBtn, BorderLayout.EAST);
 
-        header.addMouseListener(new MouseAdapter(){
-            public void mouseClicked(MouseEvent e){
-                if (e.getButton()==MouseEvent.BUTTON3) showTabContextMenu(e, tab, nameLbl);
-                else switchToTab(tab);
+        header.putClientProperty("linkedTab", tab);
+
+        header.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                if (e.getButton() == MouseEvent.BUTTON3)
+                    showTabContextMenu(e, tab, nameLbl);
+                else
+                    switchToTab(tab);
             }
         });
 
         // Double-click name to rename
-        nameLbl.addMouseListener(new MouseAdapter(){
-            public void mouseClicked(MouseEvent e){
-                if (e.getClickCount()==2) {
-                    String newName = JOptionPane.showInputDialog(frame,"Rename task:",tab.treeName);
-                    if (newName!=null&&!newName.trim().isEmpty()) {
+        nameLbl.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    String newName = JOptionPane.showInputDialog(frame, "Rename task:", tab.treeName);
+                    if (newName != null && !newName.trim().isEmpty()) {
                         tab.treeName = newName.trim();
                         nameLbl.setText(tab.treeName);
                         tabBar.revalidate();
@@ -283,8 +330,8 @@ public class TurboClick implements NativeKeyListener {
             }
         });
 
-        tab.setOnRunStateChanged(() -> SwingUtilities.invokeLater(() ->
-            dot.setForeground(tab.isRunning() ? new Color(40,220,80) : new Color(60,60,80))));
+        tab.setOnRunStateChanged(() -> SwingUtilities.invokeLater(
+                () -> dot.setForeground(tab.isRunning() ? new Color(40, 220, 80) : new Color(60, 60, 80))));
 
         return header;
     }
@@ -293,36 +340,51 @@ public class TurboClick implements NativeKeyListener {
         activeTab = tab;
         CardLayout cl = (CardLayout) tabContent.getLayout();
         cl.show(tabContent, tab.treeId);
-        // Highlight active tab header
         for (Component c : tabBar.getComponents()) {
             if (c instanceof JPanel) {
-                c.setBackground(new Color(18,18,24));
+                JPanel p = (JPanel) c;
+                boolean isActive = p.getClientProperty("linkedTab") == tab;
+                p.setBackground(isActive ? new Color(40, 40, 62) : new Color(18, 18, 24));
+                p.setBorder(isActive
+                        ? BorderFactory.createMatteBorder(0, 0, 2, 0, new Color(80, 140, 255))
+                        : BorderFactory.createEmptyBorder());
             }
         }
-        tabBar.revalidate(); tabBar.repaint();
+        tabBar.revalidate();
+        tabBar.repaint();
     }
 
     static void closeTab(TreeTab tab) {
-        if (treeTabs.size() <= 1) { JOptionPane.showMessageDialog(frame,"Cannot close the last tab."); return; }
+        if (treeTabs.size() <= 1) {
+            JOptionPane.showMessageDialog(frame, "Cannot close the last tab.");
+            return;
+        }
         tab.stopTree();
         treeTabs.remove(tab);
         tabContent.remove(tab);
         // Remove header
-        for (int i = tabBar.getComponentCount()-1; i >= 0; i--) {
+        for (int i = tabBar.getComponentCount() - 1; i >= 0; i--) {
             Component c = tabBar.getComponent(i);
             // Simple check — remove matching panel
         }
         tabBar.removeAll();
         // Re-add all remaining headers + "+" button
-        JButton addBtn = new JButton("+");
-        addBtn.setFont(new Font("SansSerif",Font.BOLD,16));
-        addBtn.setBackground(new Color(18,18,24)); addBtn.setForeground(new Color(100,150,200));
-        addBtn.setBorderPainted(false); addBtn.setFocusPainted(false); addBtn.setOpaque(true);
-        addBtn.setPreferredSize(new Dimension(36,38));
+        JButton addBtn = new JButton("＋");
+        addBtn.setFont(new Font("SansSerif", Font.BOLD, 16));
+        addBtn.setBackground(new Color(18, 18, 24));
+        addBtn.setForeground(new Color(80, 140, 255));
+        addBtn.setBorderPainted(false);
+        addBtn.setFocusPainted(false);
+        addBtn.setOpaque(true);
+        addBtn.setMinimumSize(new Dimension(42, 38));
+        addBtn.setPreferredSize(new Dimension(42, 38));
+        addBtn.setMaximumSize(new Dimension(42, 38));
         addBtn.addActionListener(e -> addNewTreeTab());
-        for (TreeTab t : treeTabs) tabBar.add(buildTabHeader(t.treeName, t));
+        for (TreeTab t : treeTabs)
+            tabBar.add(buildTabHeader(t.treeName, t));
         tabBar.add(addBtn);
-        tabBar.revalidate(); tabBar.repaint();
+        tabBar.revalidate();
+        tabBar.repaint();
         switchToTab(treeTabs.get(0));
     }
 
@@ -330,16 +392,31 @@ public class TurboClick implements NativeKeyListener {
         JPopupMenu menu = new JPopupMenu();
         JMenuItem rename = new JMenuItem("✏ Rename");
         rename.addActionListener(ev -> {
-            String n = JOptionPane.showInputDialog(frame,"Rename:",tab.treeName);
-            if (n!=null&&!n.trim().isEmpty()) { tab.treeName=n.trim(); nameLbl.setText(tab.treeName); tabBar.revalidate(); }
+            String n = JOptionPane.showInputDialog(frame, "Rename:", tab.treeName);
+            if (n != null && !n.trim().isEmpty()) {
+                tab.treeName = n.trim();
+                nameLbl.setText(tab.treeName);
+                tabBar.revalidate();
+            }
         });
         JMenuItem dup = new JMenuItem("⧉ Duplicate");
-        dup.addActionListener(ev -> { /* TODO: deep copy nodes */ });
+        dup.addActionListener(ev -> {
+            /* TODO: deep copy nodes */ });
         JMenuItem run = new JMenuItem(tab.isRunning() ? "■ Stop" : "▶ Run");
-        run.addActionListener(ev -> { if(tab.isRunning()) tab.stopTree(); else tab.startTree(); });
+        run.addActionListener(ev -> {
+            if (tab.isRunning())
+                tab.stopTree();
+            else
+                tab.startTree();
+        });
         JMenuItem del = new JMenuItem("🗑 Close Tab");
         del.addActionListener(ev -> closeTab(tab));
-        menu.add(rename); menu.add(dup); menu.addSeparator(); menu.add(run); menu.addSeparator(); menu.add(del);
+        menu.add(rename);
+        menu.add(dup);
+        menu.addSeparator();
+        menu.add(run);
+        menu.addSeparator();
+        menu.add(del);
         menu.show(e.getComponent(), e.getX(), e.getY());
     }
 
@@ -348,19 +425,30 @@ public class TurboClick implements NativeKeyListener {
     public void nativeKeyPressed(NativeKeyEvent e) {
         if (e.getKeyCode() == globalStopKey) {
             SwingUtilities.invokeLater(() -> {
-                for (TreeTab t : treeTabs) t.stopTree();
-                if (simpleClickPanel != null) simpleClickPanel.stopClicking();
+                for (TreeTab t : treeTabs)
+                    t.stopTree();
+                if (simpleClickPanel != null)
+                    simpleClickPanel.stopClicking();
             });
         }
         // Forward to active tree tab if it has a hotkey
         if (activeTab != null) {
             if (e.getKeyCode() == activeTab.hotKeyCode) {
                 SwingUtilities.invokeLater(() -> {
-                    if (activeTab.isRunning()) activeTab.stopTree(); else activeTab.startTree();
+                    if (activeTab.isRunning())
+                        activeTab.stopTree();
+                    else
+                        activeTab.startTree();
                 });
             }
         }
     }
-    @Override public void nativeKeyReleased(NativeKeyEvent e) {}
-    @Override public void nativeKeyTyped(NativeKeyEvent e) {}
+
+    @Override
+    public void nativeKeyReleased(NativeKeyEvent e) {
+    }
+
+    @Override
+    public void nativeKeyTyped(NativeKeyEvent e) {
+    }
 }

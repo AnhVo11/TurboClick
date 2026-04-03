@@ -9,6 +9,8 @@ import java.awt.event.*;
 import java.io.File;
 import java.util.*;
 
+import ui.SettingsPanel;
+
 public class TreeTab extends JPanel {
 
     public String treeName;
@@ -30,6 +32,10 @@ public class TreeTab extends JPanel {
     private Runnable onRunStateChanged;
     private JTextArea logArea;
     private boolean logVisible = false;
+    private RecordingEngine recorder = new RecordingEngine();
+    private JPanel chatPanel;
+    private JTextArea chatLog;
+    private java.util.List<String> chatHistory = new java.util.ArrayList<>();
 
     public TreeTab(String name) {
         this.treeName = name;
@@ -65,7 +71,15 @@ public class TreeTab extends JPanel {
         logScroll.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(50, 50, 65)));
         logScroll.setVisible(false);
 
-        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, body, logScroll);
+        chatPanel = buildChatPanel();
+        chatPanel.setVisible(false);
+
+        JPanel centerStack = new JPanel(new BorderLayout());
+        centerStack.setBackground(new Color(22, 22, 28));
+        centerStack.add(body, BorderLayout.CENTER);
+        centerStack.add(chatPanel, BorderLayout.SOUTH);
+
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, centerStack, logScroll);
         split.setResizeWeight(1.0);
         split.setDividerSize(0);
         split.setBorder(null);
@@ -211,7 +225,8 @@ public class TreeTab extends JPanel {
                 return;
             File file = fc.getSelectedFile();
             try {
-                SaveFormat.TaskFile tf = TaskSerializer.load(file);
+                String loadJson = new String(java.nio.file.Files.readAllBytes(file.toPath()));
+                SaveFormat.TaskFile tf = TaskSerializer.load(loadJson);
                 // Confirm overwrite if canvas already has nodes
                 if (!canvas.getNodes().isEmpty()) {
                     int r = JOptionPane.showConfirmDialog(this,
@@ -234,23 +249,26 @@ public class TreeTab extends JPanel {
                         "Load failed:\n" + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
         });
-        JButton logBtn = toolBtn("⬡ Log", new Color(90, 90, 120));
+        JButton logBtn = toolBtn("⬡ Event Log", new Color(90, 90, 120));
+        JButton recordBtn = toolBtn("⏺ AI Learn", new Color(180, 60, 60));
+        JButton chatBtn = toolBtn("✦ AI Chat", new Color(120, 80, 200));
         logBtn.addActionListener(e -> toggleLog());
+        recordBtn.addActionListener(e -> toggleRecording(recordBtn));
+        chatBtn.addActionListener(e -> toggleChat());
 
         JButton zoomInBtn = toolBtn("+", new Color(90, 90, 120));
         JButton zoomOutBtn = toolBtn("-", new Color(90, 90, 120));
-        JButton zoomRstBtn = toolBtn("1:1", new Color(90, 90, 120));
+        JButton zoomRstBtn = toolBtn("100%", new Color(90, 90, 120));
         zoomInBtn.addActionListener(e -> canvas.zoomIn());
         zoomOutBtn.addActionListener(e -> canvas.zoomOut());
         zoomRstBtn.addActionListener(e -> canvas.zoomReset());
 
-        bar.add(dot);
-        bar.add(nameLbl);
-        bar.add(Box.createHorizontalStrut(10));
         bar.add(runBtn);
         bar.add(loopBtn);
         bar.add(stopBtn);
         bar.add(architectBtn);
+        bar.add(recordBtn);
+        bar.add(chatBtn);
         bar.add(Box.createHorizontalStrut(8));
         bar.add(saveBtn);
         bar.add(loadBtn);
@@ -258,6 +276,10 @@ public class TreeTab extends JPanel {
         bar.add(fitBtn);
         bar.add(clearBtn);
         bar.add(Box.createHorizontalStrut(8));
+        JLabel zoomLbl = new JLabel("Zoom:");
+        zoomLbl.setForeground(new Color(100, 100, 130));
+        zoomLbl.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        bar.add(zoomLbl);
         bar.add(zoomOutBtn);
         bar.add(zoomInBtn);
         bar.add(zoomRstBtn);
@@ -538,7 +560,7 @@ public class TreeTab extends JPanel {
         b.setFocusPainted(false);
         b.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(borderColor, 1),
-                BorderFactory.createEmptyBorder(4, 10, 4, 10)));
+                BorderFactory.createEmptyBorder(4, 7, 4, 7)));
         b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         b.addMouseListener(new java.awt.event.MouseAdapter() {
             public void mouseEntered(java.awt.event.MouseEvent e) {
@@ -558,6 +580,325 @@ public class TreeTab extends JPanel {
 
     public NodeCanvas getCanvas() {
         return canvas;
+    }
+
+    // ── Recording ─────────────────────────────────────────────
+    private void toggleRecording(JButton btn) {
+        if (recorder.isRecording()) {
+            recorder.stop();
+            btn.setText("⏺ Record");
+            btn.setForeground(new Color(180, 60, 60));
+            int count = recorder.getActions().size();
+            if (count == 0) {
+                JOptionPane.showMessageDialog(this, "No actions recorded.");
+                return;
+            }
+            int r = JOptionPane.showConfirmDialog(this,
+                    count + " actions recorded. Send to AI for analysis?",
+                    "Analyze Recording", JOptionPane.YES_NO_OPTION);
+            if (r == JOptionPane.YES_OPTION)
+                analyzeRecording();
+        } else {
+            if (!SettingsPanel.hasApiKey()) {
+                JOptionPane.showMessageDialog(this,
+                        "No API key set.\nGo to Settings to add your Anthropic API key.");
+                return;
+            }
+            recorder.start();
+            btn.setText("⏹ Stop");
+            btn.setForeground(new Color(255, 80, 80));
+            recorder.setOnActionRecorded(() -> SwingUtilities
+                    .invokeLater(() -> appendLog("Recording", recorder.getActions().size() + " actions captured")));
+        }
+    }
+
+    private void analyzeRecording() {
+        JDialog progress = new JDialog((java.awt.Frame) null, "Analyzing...", false);
+        progress.setSize(320, 90);
+        progress.setLocationRelativeTo(this);
+        progress.setUndecorated(true);
+        JPanel pp = new JPanel(new BorderLayout());
+        pp.setBackground(new Color(22, 22, 30));
+        pp.setBorder(BorderFactory.createLineBorder(new Color(80, 80, 120)));
+        JLabel pl = new JLabel("  ✦ AI is analyzing your recording...", SwingConstants.LEFT);
+        pl.setForeground(new Color(160, 120, 255));
+        pl.setFont(new Font("SansSerif", Font.BOLD, 12));
+        pl.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
+        JProgressBar bar = new JProgressBar();
+        bar.setIndeterminate(true);
+        bar.setBackground(new Color(30, 30, 45));
+        bar.setForeground(new Color(120, 80, 220));
+        pp.add(pl, BorderLayout.CENTER);
+        pp.add(bar, BorderLayout.SOUTH);
+        progress.setContentPane(pp);
+        progress.setVisible(true);
+
+        java.util.List<RecordingEngine.RecordedAction> actions = new java.util.ArrayList<>(
+                recorder.getActions());
+
+        new Thread(() -> {
+            try {
+                String json = AIAnalyzer.analyzeRecording(actions);
+                SwingUtilities.invokeLater(() -> {
+                    progress.dispose();
+                    applyAIResult(json);
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> {
+                    progress.dispose();
+                    JOptionPane.showMessageDialog(TreeTab.this,
+                            "Analysis failed:\n" + ex.getMessage(), "Error",
+                            JOptionPane.ERROR_MESSAGE);
+                });
+            }
+        }).start();
+    }
+
+    private void applyAIResult(String json) {
+        // Strip any markdown fences
+        json = json.replaceAll("(?s)```json\\s*", "").replaceAll("```", "").trim();
+        try {
+            SaveFormat.TaskFile tf = TaskSerializer.load(json);
+            if (!canvas.getNodes().isEmpty()) {
+                int r = JOptionPane.showConfirmDialog(this,
+                        "Replace current canvas with AI-generated task?",
+                        "Apply AI Task", JOptionPane.YES_NO_OPTION);
+                if (r != JOptionPane.YES_OPTION)
+                    return;
+                canvas.getNodes().clear();
+                canvas.getArrows().clear();
+            }
+            String newStart = TaskSerializer.applyToCanvas(tf, canvas, 0, 0);
+            if (newStart != null)
+                canvas.setStartNode(newStart);
+            treeName = tf.taskName != null ? tf.taskName : treeName;
+            canvas.repaint();
+            // Store JSON for chat context
+            chatHistory.clear();
+            chatHistory.add(json);
+            appendLog("AI", "Task generated — " + canvas.getNodes().size() + " nodes");
+            // Open chat panel
+            chatPanel.setVisible(true);
+            revalidate();
+            addToChatLog("AI", "Task generated! I created "
+                    + canvas.getNodes().size() + " nodes based on your recording.\n"
+                    + "You can ask me to adjust anything — e.g. 'add a 2 second wait between steps' "
+                    + "or 'make step 3 wait for the button to appear first'.");
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this,
+                    "Could not parse AI response:\n" + ex.getMessage()
+                            + "\n\nRaw response:\n" + json.substring(0, Math.min(300, json.length())),
+                    "Parse Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    // ── Chat panel ────────────────────────────────────────────
+    private void toggleChat() {
+        if (!SettingsPanel.hasApiKey()) {
+            JOptionPane.showMessageDialog(this,
+                    "No API key set.\nGo to Settings to add your Anthropic API key.");
+            return;
+        }
+        chatPanel.setVisible(!chatPanel.isVisible());
+        revalidate();
+        repaint();
+    }
+
+    private JPanel buildChatPanel() {
+        JPanel panel = new JPanel(new BorderLayout(0, 0));
+        panel.setBackground(new Color(18, 18, 26));
+        panel.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(80, 60, 140)));
+        panel.setPreferredSize(new Dimension(0, 200));
+
+        // Header
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBackground(new Color(24, 18, 38));
+        header.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        JLabel title = new JLabel("✦ AI Chat  —  ask me to adjust your task");
+        title.setFont(new Font("SansSerif", Font.BOLD, 11));
+        title.setForeground(new Color(160, 120, 255));
+        JButton closeBtn = new JButton("×");
+        closeBtn.setFont(new Font("SansSerif", Font.BOLD, 13));
+        closeBtn.setBackground(new Color(24, 18, 38));
+        closeBtn.setForeground(new Color(120, 100, 160));
+        closeBtn.setBorderPainted(false);
+        closeBtn.setFocusPainted(false);
+        closeBtn.setOpaque(true);
+        closeBtn.addActionListener(e -> {
+            chatPanel.setVisible(false);
+            revalidate();
+        });
+        header.add(title, BorderLayout.WEST);
+        header.add(closeBtn, BorderLayout.EAST);
+        panel.add(header, BorderLayout.NORTH);
+
+        // Chat log
+        chatLog = new JTextArea();
+        chatLog.setEditable(false);
+        chatLog.setBackground(new Color(18, 18, 26));
+        chatLog.setForeground(new Color(200, 200, 220));
+        chatLog.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        chatLog.setLineWrap(true);
+        chatLog.setWrapStyleWord(true);
+        chatLog.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
+        JScrollPane logScroll = new JScrollPane(chatLog);
+        logScroll.setBorder(null);
+        logScroll.getViewport().setBackground(new Color(18, 18, 26));
+        panel.add(logScroll, BorderLayout.CENTER);
+
+        // Input row
+        JPanel inputRow = new JPanel(new BorderLayout(6, 0));
+        inputRow.setBackground(new Color(22, 18, 32));
+        inputRow.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
+
+        JTextField inputField = new JTextField();
+        inputField.setBackground(new Color(32, 28, 46));
+        inputField.setForeground(new Color(220, 220, 240));
+        inputField.setCaretColor(new Color(160, 120, 255));
+        inputField.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(80, 60, 120)),
+                BorderFactory.createEmptyBorder(4, 8, 4, 8)));
+        inputField.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        inputField.setToolTipText("Ask AI to adjust your task...");
+
+        JButton sendBtn = new JButton("Send");
+        sendBtn.setFont(new Font("SansSerif", Font.BOLD, 11));
+        sendBtn.setBackground(new Color(100, 60, 200));
+        sendBtn.setForeground(Color.WHITE);
+        sendBtn.setOpaque(true);
+        sendBtn.setBorderPainted(false);
+        sendBtn.setFocusPainted(false);
+        sendBtn.setPreferredSize(new Dimension(70, 30));
+        sendBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        Runnable doSend = () -> {
+            String msg = inputField.getText().trim();
+            if (msg.isEmpty())
+                return;
+            inputField.setText("");
+            addToChatLog("You", msg);
+            sendChatMessage(msg);
+        };
+
+        sendBtn.addActionListener(e -> doSend.run());
+        inputField.addActionListener(e -> doSend.run());
+
+        inputRow.add(inputField, BorderLayout.CENTER);
+        inputRow.add(sendBtn, BorderLayout.EAST);
+        panel.add(inputRow, BorderLayout.SOUTH);
+
+        return panel;
+    }
+
+    private void addToChatLog(String who, String msg) {
+        if (chatLog == null)
+            return;
+        SwingUtilities.invokeLater(() -> {
+            chatLog.append(who + ":  " + msg + "\n\n");
+            chatLog.setCaretPosition(chatLog.getDocument().getLength());
+        });
+    }
+
+    private void sendChatMessage(String userMsg) {
+        // Build current canvas JSON for context
+        String canvasJson = "{}";
+        try {
+            java.io.StringWriter sw = new java.io.StringWriter();
+            // Simple - just use last known json or serialize current state
+            if (!chatHistory.isEmpty())
+                canvasJson = chatHistory.get(chatHistory.size() - 1);
+        } catch (Exception ignored) {
+        }
+
+        final String contextJson = canvasJson;
+        String systemPrompt = AIAnalyzer.buildChatSystemPrompt(contextJson);
+
+        // Build messages array with history
+        StringBuilder messages = new StringBuilder("[");
+        // Add previous turns
+        for (int i = 0; i < chatHistory.size() - 1; i += 2) {
+            if (i + 1 < chatHistory.size()) {
+                messages.append("{\"role\":\"user\",\"content\":")
+                        .append(jsonEsc(chatHistory.get(i))).append("},");
+                messages.append("{\"role\":\"assistant\",\"content\":")
+                        .append(jsonEsc(chatHistory.get(i + 1))).append("},");
+            }
+        }
+        messages.append("{\"role\":\"user\",\"content\":")
+                .append(jsonEsc(userMsg)).append("}]");
+
+        addToChatLog("AI", "Thinking...");
+
+        final String msgJson = messages.toString();
+        new Thread(() -> {
+            try {
+                // Direct API call with conversation
+                String body = "{"
+                        + "\"model\":\"claude-sonnet-4-20250514\","
+                        + "\"max_tokens\":4096,"
+                        + "\"system\":" + jsonEsc(systemPrompt) + ","
+                        + "\"messages\":" + msgJson
+                        + "}";
+
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) new java.net.URL(
+                        "https://api.anthropic.com/v1/messages").openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("x-api-key", SettingsPanel.getApiKey());
+                conn.setRequestProperty("anthropic-version", "2023-06-01");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(30000);
+                conn.setReadTimeout(120000);
+                conn.getOutputStream().write(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                String response = new String(conn.getInputStream().readAllBytes(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                String reply = AIAnalyzer.callAPI(systemPrompt,
+                        "[{\"type\":\"text\",\"text\":" + jsonEsc(userMsg) + "}]");
+
+                SwingUtilities.invokeLater(() -> {
+                    // Remove "Thinking..." line
+                    String current = chatLog.getText();
+                    int thinking = current.lastIndexOf("AI:  Thinking...");
+                    if (thinking >= 0)
+                        try {
+                            chatLog.replaceRange("", thinking, current.length());
+                        } catch (Exception ignored) {
+                        }
+
+                    chatHistory.add(userMsg);
+                    chatHistory.add(reply);
+
+                    // Check if reply looks like JSON
+                    String trimmed = reply.replaceAll("(?s)```json\\s*", "")
+                            .replaceAll("```", "").trim();
+                    if (trimmed.startsWith("{") && trimmed.contains("\"nodes\"")) {
+                        addToChatLog("AI", "Updated your task! Applying changes...");
+                        applyAIResult(trimmed);
+                    } else {
+                        addToChatLog("AI", reply);
+                    }
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> {
+                    String current = chatLog.getText();
+                    int thinking = current.lastIndexOf("AI:  Thinking...");
+                    if (thinking >= 0)
+                        try {
+                            chatLog.replaceRange("", thinking, current.length());
+                        } catch (Exception ignored) {
+                        }
+                    addToChatLog("AI", "Error: " + ex.getMessage());
+                });
+            }
+        }).start();
+    }
+
+    private static String jsonEsc(String s) {
+        if (s == null)
+            return "null";
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\"";
     }
 
     private void toggleLog() {

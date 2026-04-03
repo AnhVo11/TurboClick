@@ -1,4 +1,5 @@
 package ui;
+
 import nodes.*;
 
 import javax.imageio.ImageIO;
@@ -68,8 +69,7 @@ public class TaskSerializer {
     }
 
     // ── Load ─────────────────────────────────────────────────
-    public static SaveFormat.TaskFile load(File file) throws Exception {
-        String json = new String(java.nio.file.Files.readAllBytes(file.toPath()));
+    public static SaveFormat.TaskFile load(String json) throws Exception {
         return parseJson(json);
     }
 
