@@ -2,6 +2,8 @@
 
 **Visual automation builder for macOS** — create and run screen automation tasks without writing code.
 
+![TurboClick](https://img.shields.io/badge/platform-macOS-blue) ![Java](https://img.shields.io/badge/java-25-orange) ![Version](https://img.shields.io/badge/version-2.0-green)
+
 ---
 
 ## What It Does
@@ -57,7 +59,7 @@ It also has an **AI Learn** feature: record yourself doing something on screen, 
 
 ## Build & Run
 
-
+```bash
 # Clone the repo
 git clone https://github.com/AnhVo11/TurboClick.git
 cd TurboClick
@@ -68,7 +70,7 @@ chmod +x build.sh
 
 # Build a .dmg installer
 ./build.sh package
-
+```
 
 The DMG will appear in `dist/TurboClick-2.0.dmg`.
 
@@ -88,7 +90,7 @@ The DMG will appear in `dist/TurboClick-2.0.dmg`.
 
 ## Project Structure
 
-
+```
 src/
   engine/     Execution, rule engine, auto-clicker, AI, recording
   nodes/      Node types and logic
@@ -96,8 +98,10 @@ src/
 TurboClick.java   Main entry point
 build.sh          Compile + run + package script
 lib/              jNativeHook dependency
-
+```
 
 ---
 
 ## License
+
+MIT
