@@ -2801,14 +2801,29 @@ public class NodeEditor extends JPanel {
                 BorderFactory.createLineBorder(new Color(60, 60, 85)),
                 BorderFactory.createEmptyBorder(4, 8, 4, 8)));
         nameField.addActionListener(e -> {
-            setStrField("imageName", nameField.getText());
-            currentNode.label = nameField.getText();
+            String newName = nameField.getText();
+            setStrField("imageName", newName);
+            currentNode.label = newName;
+            for (ui.NodeCanvas.Arrow a : canvas.getArrows()) {
+                if (a.fromNodeId.equals(currentNode.id)) {
+                    a.label = newName;
+                }
+            }
+            canvas.repaint();
             rebuild();
         });
         nameField.addFocusListener(new FocusAdapter() {
             public void focusLost(FocusEvent e) {
-                setStrField("imageName", nameField.getText());
-                currentNode.label = nameField.getText();
+                String newName = nameField.getText();
+                setStrField("imageName", newName);
+                currentNode.label = newName;
+                // Update arrow labels on canvas
+                for (ui.NodeCanvas.Arrow a : canvas.getArrows()) {
+                    if (a.fromNodeId.equals(currentNode.id)) {
+                        a.label = newName;
+                    }
+                }
+                canvas.repaint();
                 rebuild();
             }
         });
@@ -2820,8 +2835,6 @@ public class NodeEditor extends JPanel {
 
         addSection("Template Image");
         buildCaptureSection("template", null);
-        addLabeledSpinner("Match threshold %", getIntField("threshold", 85), 1, 100,
-                val -> setIntField("threshold", val));
     }
 
     // =========================================================
