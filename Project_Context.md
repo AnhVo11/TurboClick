@@ -7,21 +7,26 @@ A Java macOS desktop automation app with two modes:
 
 ## Build Command
 ```bash
-chmod +x build.sh && ./build.sh
+chmod +x build.sh && ./build.sh          # compile + run
+./build.sh package                        # compile + build DMG → dist/TurboClick-2.0.dmg
 # Requires: lib/jnativehook-2.2.2.jar
+# Requires: TurboClick.icns (generated via iconutil from icon.iconset/)
+# dist/ is excluded from git via .gitignore
 ```
 
 ## File Structure
 ```
 src/
-  engine/   ExecutionContext.java, RuleEngine.java, SimpleClickEngine.java
+  engine/   ExecutionContext.java, RuleEngine.java, SimpleClickEngine.java,
+            RecordingEngine.java, AIAnalyzer.java
   nodes/    BaseNode.java, NodeFactory.java, ImageNode.java, WatchCaseNode.java
   ui/       NodeCanvas.java, NodeEditor.java, NodePalette.java,
-            SimpleClickPanel.java, TaskArchitectOverlay.java, TreeTab.java
-SaveFormat.java
-TaskSerializer.java
+            SimpleClickPanel.java, TaskArchitectOverlay.java, TreeTab.java,
+            SettingsPanel.java, SaveFormat.java, TaskSerializer.java
+TurboClick.java
 build.sh
 lib/jnativehook-2.2.2.jar
+.vscode/settings.json
 ```
 
 ---
@@ -29,141 +34,162 @@ lib/jnativehook-2.2.2.jar
 ## What's Been Built & Changed
 
 ### BaseNode.java (src/nodes/)
-- Added `public int nodeLoopCount = 1`
+- NodeType enum: `WATCH_ZONE, CLICK, SIMPLE_CLICK, CONDITION, LOOP, WAIT, MESSAGE, KEYBOARD, IMAGE, WATCH_CASE`
+- STOP node removed — replaced by MESSAGE node
+- `public int nodeLoopCount = 1`
 - `runState` is public volatile
-- Added `isRunStateExpired(long ms)` — tracks when state last changed
-- Added `inputs` list (public)
-- Added geometry methods:
-  - `bounds()` — Rectangle for hit testing
-  - `inputAnchor()` — top-center point
-  - `outputAnchor(String)` — bottom port points
-  - `leftInputAnchor(String)` — left side for WatchCase
-  - `rightOutputAnchor(String)` — right side for WatchCase
-- Added `setPortTarget(String, String)`
-- Added `addInputPort(String)`
-- NodePort has two-arg constructor `NodePort(name, targetNodeId)`
+- `isRunStateExpired(long ms)`
+- `inputs` list (public)
+- Geometry: `bounds()`, `inputAnchor()`, `outputAnchor()`, `leftInputAnchor()`, `rightOutputAnchor()`
+- `setPortTarget()`, `addInputPort()`
+- NodePort two-arg constructor
 
 ### RuleEngine.java (src/engine/)
-- Wraps each node execution in loop up to `nodeLoopCount` times
-- Early exit if ANY iteration succeeds (non "Not Found" result)
-- Only follows "Not Found" port if ALL iterations fail
-- null portResult (Stop node) always = success
+- Per-node loop up to `nodeLoopCount` times
+- Early exit on any success; follows "Not Found" only if all iterations fail
 
 ### SimpleClickEngine.java (src/engine/)
-- Points array is 6 elements: `{x, y, clicks, subDelayMs, afterDelayMs, btnType}`
+- Points: `{x, y, clicks, subDelayMs, afterDelayMs, btnType}`
 - btnType: 0=Left, 1=Right, 2=Middle, 3=Drag
-- Type 3 (Drag): mousePress → smooth 20-step move → mouseRelease
-- `btnMaskForPoint()` reads per-point type, falls back to global
+- Smooth 20-step drag move
 
-### SimpleClickPanel.java (src/ui/)
-- Mouse widget (56×48px): left=blue, right=red, scroll=green, bottom=orange(drag)
-- `currentPinType` persists across pins until changed
-- Table: 7 columns {#, X, Y, Clicks, Sub-delay, After-delay, Type}
-- Type stored as raw int, renderer shows colored L/R/M/D badge
-- Drag pair rows: orange tint background (42,35,22)
-- # column shows ◆N (start) / ↳N (end) for drag pairs
-- Right-click any drag handle → removes entire pair with warning dialog
-- Remove button warns before deleting drag pair ("Don't show again" checkbox)
-- DragPin: two JWindows (startWin, endWin) + midWin diamond
-- dragLineOverlay: full-screen POPUP window, draws orange dashed line + arrowhead
-- All handles: setFocusableWindowState(false)
+### RecordingEngine.java (src/engine/) — NEW
+- Captures mouse clicks + full-screen screenshots via jNativeHook
+- `RecordedAction`: type (LEFT/RIGHT/DOUBLE/DRAG), coords, timestamp, screenshotBase64
+- Drag detection via 10px threshold, double-click via 300ms window
+- `start()` / `stop()` / `getActions()` / `isRecording()` / `setOnActionRecorded()`
 
-### NodeEditor.java (src/ui/)
-- Removed ring color picker entirely from Simple Click node panel
-- Table: 7 columns {#, X, Y, Clicks, Sub-delay, After-delay, Type}
-- Drag rows: orange tint (42,35,22), ◆/↳ indicators in # column
-- Right-click drag row in table → warns + deletes both rows
-- Type column: colored L/R/M/D badge, click to cycle (not for drag rows)
-- EditorPin: type-colored rings, no badge, hover=red dot
-- DragEditorPin: two handles + midpoint diamond + dragLineOverlay
-- Smart Pin HUD: mouse widget (56×48), sessionPinType persists
-- buildPointsList includes 6th element (btnType)
+### AIAnalyzer.java (src/engine/) — NEW
+- Sends recordings to Claude Vision API (claude-sonnet-4-20250514)
+- `analyzeRecording(actions)` — multimodal prompt with action list + screenshots
+- `callAPI(system, contentJson)` — hand-rolled HTTP to Anthropic API
+- `buildChatSystemPrompt(currentTaskJson)` — context-aware chat prompt
+- Max 8 screenshots per analysis (evenly sampled)
+- System prompt: combine all clicks into ONE SIMPLE_CLICK, KEYBOARD for typing, WATCH_ZONE for waiting, WAIT for pauses, MESSAGE at end
+- Schema hint covers all node types with correct field structure
 
-### NodeCanvas.java (src/ui/)
-- Loop badge (↺ N) drawn at top-right corner of every node
-- Badge is subtle/gray when count=1, gold pill when count>1
-- Single left-click on badge opens spinner popup to set nodeLoopCount
-- Popup closes on focus loss, updates node live while spinning
-- loopBadgeRect() / loopBadgeHit() helper methods
+### ExecutionContext.java (src/engine/)
+- `LogCallback` interface — fires on every `setHudStatus()` call
+- `setLogCallback()` — wires Event Log panel in TreeTab
 
-### TreeTab.java (src/ui/)
-- Run, Loop, Stop buttons in toolbar
-- Loop button: repeats entire tree until stopped
-- Run HUD: floating status bar with node name + stop button
-- findStartNode() — finds node with no incoming connections
-- Save / Load buttons wired to TaskSerializer (file chooser, .json extension)
-- "Save Selection" saves only selected nodes + internal arrows
+### SettingsPanel.java (src/ui/) — NEW
+- Stores Anthropic API key in `~/.turboclick/config.properties`
+- `getApiKey()` / `setApiKey()` / `hasApiKey()` / `save()`
+- Settings dialog with password field + show/hide toggle
+
+### SaveFormat.java (src/ui/) — NEW
+- Hand-rolled data-class container, no external JSON library
+- `TaskFile`, `NodeData`, `WatchCaseData`, `WatchZoneData`, `ArrowData`
+- MESSAGE node fields fully represented
+- VERSION = 1
+
+### TaskSerializer.java (src/ui/) — NEW
+- `saveTask()`, `saveNodes()`, `load(File)`, `load(String)`, `applyToCanvas()`
+- Hand-rolled JSON writer + recursive parser
+- Full reflection-based serialization for all node types
+- MESSAGE node fully serialized/deserialized
 
 ### TaskArchitectOverlay.java (src/ui/) — NEW
-- Full-screen transparent JWindow overlay launched from TreeTab toolbar
-- Shows every Watch Zone rect and every click pin (Click, Simple Click, Watch Case) overlaid on the live screen
-- Two item types:
-  - **RectItem** — dashed border rect with label badge + size hint; 8 resize handles when selected
-  - **PinItem** — crosshair + color-coded ring (blue=L, red=R, green=M, orange=drag); number badge
-- Drag to reposition any rect or pin; resize rects via corner/edge handles
-- Changes write back to the live node via stored Runnable callbacks (no reflection at drag time)
-- HUD bar (top of screen): node name + item label while hovering; hint text; ✓ Done button
-- Right-click any item → confirm dialog → removes/clears that zone or pin from its node
-- ESC closes overlay via jNativeHook GlobalScreen listener
-- Dashed orange arrow lines drawn between consecutive drag-pair pins
-- Hit testing: pins take priority over rects; last-drawn item wins within same type
-- `buildItems()` uses reflection once at open time to read all node fields into ArchItem wrappers
-- `drawDragLines()` connects drag-start → drag-end pin pairs with arrowhead
+- Full-screen transparent overlay showing Watch Zone rects + click pins
+- RectItem: dashed border, 8 resize handles; PinItem: crosshair + color ring
+- Drag to move, handles to resize, right-click to delete
+- HUD bar with Done button; ESC closes
+- MESSAGE nodes excluded from overlay
+- Writes back via Runnable callbacks (no runtime reflection)
 
-### SaveFormat.java — NEW
-- Plain data-class container (no logic); hand-rolled, no external JSON library
-- `TaskFile`: version, appVersion, savedAt, taskName, startNodeId, nodes[], arrows[]
-- `NodeData`: all node fields as nullable boxed types (Integer/Boolean/Long); images as base64 String
-- `WatchCaseData`: portName, threshold, hasOutput, imageNodeId
-- `WatchZoneData`: name, rect int[4], clickMode, customPinX/Y, clickDelayMs
-- `ArrowData`: fromNodeId, fromPort, toNodeId, label, bendOffset
-- Current VERSION = 1
+### NodeCanvas.java (src/ui/)
+- Loop badge (↺ N) top-right; click to open spinner popup
+- **Rubber band selection**: drag empty area to select multiple nodes
+- Right-click selection → Save / Delete / **Duplicate** selection
+- Duplicate: copies nodes offset 40px, re-wires internal arrows, selects copies
+- **Multi-drag**: moving any selected node moves all selected nodes together
+- Right-click Add Node menu excludes: CLICK, CONDITION, LOOP, STOP
+- Icon font size 17 for KEYBOARD, SIMPLE_CLICK, MESSAGE (others 13)
 
-### TaskSerializer.java — NEW
-- `saveTask(taskName, startNodeId, nodeMap, arrows, file)` — full canvas save
-- `saveNodes(taskName, selectedNodes, allArrows, nodeMap, file)` — save selection only (arrows filtered to both-ends-in-set)
-- `load(file)` → `SaveFormat.TaskFile` — reads JSON from disk
-- `applyToCanvas(tf, canvas, offsetX, offsetY)` → remapped startNodeId — adds nodes + re-wires arrows with fresh UUIDs
-- `nodeToData()` / `dataToNode()` — per-type field serialization via reflection helpers
-- Images serialized as base64 PNG via `imgToBase64` / `base64ToImg`
-- Hand-rolled JSON writer (`writeJson`, `nodeDataToJson`) and minimal recursive parser (`parseJson`, `splitObjects`, `arrayBlock`)
-- Reflection helpers: `field()`, `getF()`, `setF()`, `setI()`, `setB()`, `str()`, `intF()`, `boolF()`, `img()`, `rect()`
-- Save/load has NOT been fully tested yet
+### NodeEditor.java (src/ui/)
+- IMAGE node: threshold spinner removed (threshold only in Watch Case)
+- IMAGE node: rename updates connected arrow labels live
+- MESSAGE node: style picker, content, timing, size, position picker, 3 color pickers
+- `addColorPicker()` — swatch opens JColorChooser
+- `showPositionPicker()` — crosshair overlay to set message position
+- `getIntField()`/`setIntField()` handle enum fields via ordinal
+- Watch Case threshold labeled "Match %"
+
+### NodeFactory.java (src/nodes/)
+- STOP removed, MESSAGE added (amber color, ✉ icon `\u2709`)
+- MessageNode: Toast (style=0) or Floating Window (style=1), customizable colors, auto-dismiss, wait-for-dismiss option, center or custom position
+- MessageNode.execute(): renders JWindow, CountDownLatch for pause/wait
+
+### WatchCaseNode.java (src/nodes/)
+- **Fixed**: first match wins per zone — stops checking other images once one matches
+- No longer clicks multiple times when multiple images match same zone
+- HUD shows zone → image + match % with ✓ / "no match" feedback
+
+### NodePalette.java (src/ui/)
+- STOP replaced with MESSAGE
+- Bigger icons for KEYBOARD, SIMPLE_CLICK, MESSAGE (font 20)
+- Watch Case icon: `\u2756` (✦)
+
+### SimpleClickPanel.java (src/ui/)
+- Mouse widget (56×48px): left=blue, right=red, scroll=green, bottom=orange
+- Table: 7 columns {#, X, Y, Clicks, Sub-delay, After-delay, Type}
+- Drag pairs: orange tint, ◆/↳ indicators, right-click removes pair
+
+### TreeTab.java (src/ui/)
+- Toolbar order: Run, Loop, Stop, Architect, AI Learn, AI Chat | Save, Load | Fit View, Clear | Zoom-, Zoom+, 100% | Event Log
+- **⏺ AI Learn**: records actions, sends to AI, applies generated node tree
+- **✦ AI Chat**: persistent chat panel, maintains conversation history, applies JSON replies to canvas
+- **⬡ Event Log**: timestamped node execution log panel
+- Analysis progress dialog during AI processing
+- `applyAIResult()`: strips markdown, loads JSON, opens chat with welcome message
+- Task name label removed from toolbar
+
+### TurboClick.java
+- Settings button in sidebar → SettingsPanel
+- Active tab: `new Color(40,40,62)` bg + blue bottom border via `getClientProperty("linkedTab")`
+- Tab headers: BorderLayout (dot+name left, × right)
+- Add tab button: ＋, fixed 42×38
 
 ---
 
 ## Key Technical Decisions
-- macOS JWindow focus: `setFocusableWindowState(false)` on all overlays
-- macOS mouse pass-through: `Window.Type.POPUP` + `setEnabled(false)`
-- macOS clip leak: always `g2.create()` / `g2.dispose()` in paint methods
-- Live drag coords: `MouseInfo.getPointerInfo()` not `e.getX()`
-- Type as raw int in table model — getValueAt only converts delay cols (4,5)
-- ESC in overlays: jNativeHook GlobalScreen listener
-- macOS buttons: JLabel with border instead of JButton for custom colors
-- TaskArchitectOverlay writes back to nodes via Runnable callbacks captured at open time (avoids repeated reflection during drag)
-- TaskSerializer uses hand-rolled JSON (no Gson/Jackson dependency) — keeps build simple
+- macOS JWindow: `setFocusableWindowState(false)` on all overlays
+- macOS pass-through: `Window.Type.POPUP` + `setEnabled(false)`
+- macOS clip leak: always `g2.create()` / `g2.dispose()`
+- Live drag: `MouseInfo.getPointerInfo()` not `e.getX()`
+- ESC in overlays: jNativeHook GlobalScreen
+- TaskSerializer: hand-rolled JSON — no external dependency
+- AI: hand-rolled HTTP to Anthropic API — no SDK
+- API key: `~/.turboclick/config.properties`
+- Enum fields in NodeEditor handled via `.ordinal()` reflection
 
 ---
 
-## Node Types
-WATCH_ZONE, CLICK, SIMPLE_CLICK, CONDITION, LOOP, WAIT, STOP, KEYBOARD, IMAGE, WATCH_CASE
+## Node Types (active)
+WATCH_ZONE, SIMPLE_CLICK, WAIT, MESSAGE, KEYBOARD, IMAGE, WATCH_CASE
+(CLICK, CONDITION, LOOP excluded from right-click palette; still in codebase)
 
 ## Port Logic
-- "Found" / "Done" → green → success path
-- "Not Found" → red → failure path
-- "Timeout" → yellow
-- Ports evenly spaced on bottom edge of node
-- WatchCase: image inputs on left, case outputs on right, Done/NoneFound on bottom
+- Done / Found → green
+- Not Found → red
+- Timeout → yellow
+- WatchCase: image inputs left, case outputs right, Done/NoneFound bottom
+- MESSAGE: single Done output
+
+## WatchCase Matching Logic
+- Iterates each zone in order
+- Per zone: capture screenshot → check each image → **first match wins, break**
+- Clicks based on zone click mode (At Match / Center / Custom Pin / None)
+- Returns Done if any zone matched, None Found if nothing matched
+- loopOnMatch: cycles all zones until nothing found anywhere
 
 ---
 
-## Future Plans (not built yet)
-1. ~~Save/load node trees to disk~~ ✅ Built (untested)
-2. Scheduling ("run at 9am daily")
-3. Simple .dmg installer
-4. Better error messages
-5. **AI "Record & Learn"** — user describes task, does it manually,
-   Claude Vision API watches screenshots + clicks, auto-generates node tree
-   - RecordingEngine.java: capture clicks + screenshots via jNativeHook
-   - AIAnalyzer.java: send to Claude API, parse JSON response → BaseNodes
-   - New "Record & Learn" button in TreeTab toolbar
+## Future Plans
+1. ~~Save/load~~ ✅
+2. ~~DMG installer~~ ✅ `./build.sh package`
+3. ~~Event log / error messages~~ ✅
+4. ~~AI Record & Learn~~ ✅ AI Learn + AI Chat
+5. **AI Create from description** — skip recording, just describe the task in chat
+6. **Scheduling** — run at specific time (Wait Until Time partially covers this)
+7. **Cross-tab AI** — AI sees all tasks, can create new tabs
